@@ -50,7 +50,9 @@ fn shell_out(program: &str, args: &[&str], print: PrintCommands) -> Result<()> {
     let result = match child.wait().unwrap().code() {
         Some(0) => Ok(()),
         Some(a) => Err(Error::subcommand_fail(program, a)),
-        None => Err(Error::general(format!("{} was terminated by a signal.", program))),
+        None => Err(Error::general(
+            format!("{} was terminated by a signal.", program),
+        )),
     };
 
     match print {
