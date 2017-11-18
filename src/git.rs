@@ -247,6 +247,16 @@ pub fn handle_fix(args: &[&str], repo: &git2::Repository) -> Result<()> {
     Ok(())
 }
 
+pub fn handle_cleanup(repo: &git2::Repository) -> Result<()> {
+    let current_branch = get_current_branch(repo);
+    for branch in get_all_local_branches(repo)? {
+        if branch.find("/").is_some() && branch != current_branch {
+            run_command(&["git", "branch", "-D", &branch])?;
+        }
+    }
+    Ok(())
+}
+
 pub fn handle_review_push(repo: &git2::Repository) -> Result<()> {
     // branch name will be user/branch_name.
     let full_branch_name = get_current_branch(repo);
@@ -332,6 +342,7 @@ pub fn handle_repository(original_args: &[&str]) -> Result<()> {
 
     match original_args[0] as &str {
         // Intercepted commands.
+        "cleanup" => handle_cleanup(&repo),
         "fix" => handle_fix(original_args, &repo),
         "review" => handle_review(original_args, &repo),
 
