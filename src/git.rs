@@ -20,8 +20,10 @@ pub fn get_aliases() -> HashMap<String, String> {
             continue;
         }
         // name is alias.<alias>, so we trim the first 6 characters.
-        rv.insert(entry.name().unwrap()[6..].to_string(),
-                  entry.value().unwrap().to_string());
+        rv.insert(
+            entry.name().unwrap()[6..].to_string(),
+            entry.value().unwrap().to_string(),
+        );
     }
     rv
 }
@@ -71,8 +73,10 @@ pub fn status() -> Result<(HashSet<PathBuf>, HashSet<PathBuf>)> {
     let mut deleted = HashSet::<PathBuf>::new();
     let mut modified = HashSet::<PathBuf>::new();
 
-    let stdout = String::from_utf8(communicate(&["git", "status", "--porcelain", "-uno"])?.stdout)
-        .unwrap();
+    let stdout = String::from_utf8(
+        communicate(&["git", "status", "--porcelain", "-uno"])?
+            .stdout,
+    ).unwrap();
     for line in stdout.lines() {
         let entries = line.trim().splitn(2, ' ').collect::<Vec<_>>();
         match entries[0] {
@@ -91,8 +95,10 @@ fn expect_working_directory_clean() -> Result<()> {
         return Ok(());
     }
 
-    let mut error = String::from("You cannot have pending changes for this command. Changed \
-                                  files:\n\n");
+    let mut error = String::from(
+        "You cannot have pending changes for this command. Changed \
+                                  files:\n\n",
+    );
     for s in deleted.union(&changed) {
         error.push_str(&format!("  {}\n", s.to_string_lossy()));
     }
@@ -113,15 +119,22 @@ struct OriginBranch {
 }
 
 fn get_origin(local_branch: &str) -> Option<OriginBranch> {
-    let remote =
-        match communicate(&["git", "config", &format!("branch.{}.remote", local_branch)]) {
-            Ok(out) => str::from_utf8(&out.stdout).unwrap().trim().to_string(),
-            Err(_) => return None,
-        };
+    let remote = match communicate(
+        &["git", "config", &format!("branch.{}.remote", local_branch)],
+    ) {
+        Ok(out) => str::from_utf8(&out.stdout).unwrap().trim().to_string(),
+        Err(_) => return None,
+    };
 
-    let branch = match communicate(&["git", "config", &format!("branch.{}.merge", local_branch)]) {
+    let branch = match communicate(
+        &["git", "config", &format!("branch.{}.merge", local_branch)],
+    ) {
         Ok(out) => {
-            str::from_utf8(&out.stdout).unwrap().trim().trim_left_matches("refs/heads/").to_string()
+            str::from_utf8(&out.stdout)
+                .unwrap()
+                .trim()
+                .trim_left_matches("refs/heads/")
+                .to_string()
         }
         Err(_) => return None,
     };
@@ -133,27 +146,34 @@ fn get_origin(local_branch: &str) -> Option<OriginBranch> {
 }
 
 /// Returns the (added, deleted, modified) files between two treeishs, e.g. branch names.
-pub fn get_changed_files(repo: &git2::Repository,
-                         old: &str,
-                         new: &str)
-                         -> Result<(HashSet<PathBuf>, HashSet<PathBuf>, HashSet<PathBuf>)> {
+pub fn get_changed_files(
+    repo: &git2::Repository,
+    old: &str,
+    new: &str,
+) -> Result<(HashSet<PathBuf>, HashSet<PathBuf>, HashSet<PathBuf>)> {
     let parent = repo.revparse_single(old)?.peel(git2::ObjectType::Tree)?;
     let current = repo.revparse_single(new)?.peel(git2::ObjectType::Tree)?;
 
     let mut diff_options = git2::DiffOptions::new();
-    diff_options.include_ignored(false)
+    diff_options
+        .include_ignored(false)
         .include_untracked(false)
         .include_typechange(false)
         .ignore_filemode(true)
         .skip_binary_check(true)
         .enable_fast_untracked_dirs(true);
-    let diff =
-        repo.diff_tree_to_tree(parent.as_tree(), current.as_tree(), Some(&mut diff_options))?;
+    let diff = repo.diff_tree_to_tree(
+        parent.as_tree(),
+        current.as_tree(),
+        Some(&mut diff_options),
+    )?;
 
     let mut added = HashSet::<PathBuf>::new();
     let mut deleted = HashSet::<PathBuf>::new();
     let mut modified = HashSet::<PathBuf>::new();
-    diff.print(git2::DiffFormat::NameStatus, |_delte, _hunk, line| {
+    diff.print(
+        git2::DiffFormat::NameStatus,
+        |_delte, _hunk, line| {
             // line is 'A\tfile/path\n'
             let path = PathBuf::from(str::from_utf8(&line.content()[2..]).unwrap().trim());
             match line.content()[0] as char {
@@ -163,32 +183,43 @@ pub fn get_changed_files(repo: &git2::Repository,
                 unknown => panic!("Unexpected status char: {}", unknown),
             };
             true
-        })?;
+        },
+    )?;
     Ok((added, deleted, modified))
 }
 
 fn run_clang_format(path: &Path) -> Result<()> {
-    dispatch_to("clang-format",
-                &["-i", "-sort-includes", "-style=Google", &path.to_string_lossy()])?;
+    dispatch_to(
+        "clang-format",
+        &[
+            "-i",
+            "-sort-includes",
+            "-style=Google",
+            &path.to_string_lossy(),
+        ],
+    )?;
     Ok(())
 }
 
 fn run_rustfmt(path: &Path) -> Result<()> {
-    dispatch_to("rustfmt",
-                &["--write-mode", "overwrite", &path.to_string_lossy()])?;
+    dispatch_to(
+        "rustfmt",
+        &["--write-mode", "overwrite", &path.to_string_lossy()],
+    )?;
     Ok(())
 }
 
 pub fn handle_fix(args: &[&str], repo: &git2::Repository) -> Result<()> {
     expect_working_directory_clean()?;
 
-    if args.len() != 2 {
-        return Err(Error::general("fix requires a base branch name to figure out which files to \
-                                   fix."
-            .into()));
-    }
+    let other_branch = if args.len() == 2 {
+        &args[1]
+    } else {
+        "origin/master"
+    };
 
-    let (added, _, modified) = get_changed_files(repo, args[1], &get_current_branch(repo))?;
+    println!("Fixing modified files compared to {}", other_branch);
+    let (added, _, modified) = get_changed_files(repo, other_branch, &get_current_branch(repo))?;
 
     let workdir = repo.workdir().unwrap();
     for path in added.union(&modified) {
@@ -223,7 +254,15 @@ pub fn handle_review_push(repo: &git2::Repository) -> Result<()> {
         let mut it = full_branch_name.splitn(2, '/');
         (it.next().unwrap(), it.next().unwrap())
     };
-    run_command(&["git", "push", "--force", user, &format!("HEAD:{}", branch_name)])?;
+    run_command(
+        &[
+            "git",
+            "push",
+            "--force",
+            user,
+            &format!("HEAD:{}", branch_name),
+        ],
+    )?;
     Ok(())
 }
 
@@ -231,7 +270,9 @@ pub fn handle_review(args: &[&str], repo: &git2::Repository) -> Result<()> {
     expect_working_directory_clean()?;
 
     if args.len() != 2 {
-        return Err(Error::general("review requires a user/branch_name to review.".into()));
+        return Err(Error::general(
+            "review requires a user/branch_name to review.".into(),
+        ));
     }
 
     if args[1] == "push" {
@@ -250,11 +291,15 @@ pub fn handle_review(args: &[&str], repo: &git2::Repository) -> Result<()> {
             let master_origin = get_origin("master").unwrap();
             remotes[&master_origin.remote].project()
         };
-        run_command(&["git",
-                      "remote",
-                      "add",
-                      user,
-                      &format!("git@github.com:{}/{}", user, project)])?;
+        run_command(
+            &[
+                "git",
+                "remote",
+                "add",
+                user,
+                &format!("git@github.com:{}/{}", user, project),
+            ],
+        )?;
     }
 
     let local_branch_name = format!("{}/{}", user, branch);
@@ -264,7 +309,15 @@ pub fn handle_review(args: &[&str], repo: &git2::Repository) -> Result<()> {
 
     // Since the local_branch name is the remote/branch git also resolves it to the correct remote.
     run_command(&["git", "fetch", user])?;
-    run_command(&["git", "branch", "--track", &local_branch_name, &local_branch_name])?;
+    run_command(
+        &[
+            "git",
+            "branch",
+            "--track",
+            &local_branch_name,
+            &local_branch_name,
+        ],
+    )?;
     run_command(&["git", "checkout", &local_branch_name])?;
     Ok(())
 }
