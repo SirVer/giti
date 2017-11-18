@@ -1,0 +1,8 @@
+[package]
+authors = ["Holger Rapp <HolgerRapp@gmx.net>"]
+name = "giti"
+version = "0.1.0"
+
+[dependencies]
+git2 = "0.6.4"
+term = "0.4.5"
