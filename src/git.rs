@@ -61,7 +61,9 @@ fn get_remotes() -> Result<HashMap<String, Remote>> {
         }
         let mut it = line.split_whitespace();
         let name = it.next().unwrap();
-        let origin = Remote { url: it.next().unwrap().to_string() };
+        let origin = Remote {
+            url: it.next().unwrap().to_string(),
+        };
         result.insert(name.to_string(), origin);
     }
     Ok(result)
@@ -73,10 +75,8 @@ pub fn status() -> Result<(HashSet<PathBuf>, HashSet<PathBuf>)> {
     let mut deleted = HashSet::<PathBuf>::new();
     let mut modified = HashSet::<PathBuf>::new();
 
-    let stdout = String::from_utf8(
-        communicate(&["git", "status", "--porcelain", "-uno"])?
-            .stdout,
-    ).unwrap();
+    let stdout =
+        String::from_utf8(communicate(&["git", "status", "--porcelain", "-uno"])?.stdout).unwrap();
     for line in stdout.lines() {
         let entries = line.trim().splitn(2, ' ').collect::<Vec<_>>();
         match entries[0] {
@@ -97,7 +97,7 @@ fn expect_working_directory_clean() -> Result<()> {
 
     let mut error = String::from(
         "You cannot have pending changes for this command. Changed \
-                                  files:\n\n",
+         files:\n\n",
     );
     for s in deleted.union(&changed) {
         error.push_str(&format!("  {}\n", s.to_string_lossy()));
@@ -119,23 +119,17 @@ struct OriginBranch {
 }
 
 fn get_origin(local_branch: &str) -> Option<OriginBranch> {
-    let remote = match communicate(
-        &["git", "config", &format!("branch.{}.remote", local_branch)],
-    ) {
+    let remote = match communicate(&["git", "config", &format!("branch.{}.remote", local_branch)]) {
         Ok(out) => str::from_utf8(&out.stdout).unwrap().trim().to_string(),
         Err(_) => return None,
     };
 
-    let branch = match communicate(
-        &["git", "config", &format!("branch.{}.merge", local_branch)],
-    ) {
-        Ok(out) => {
-            str::from_utf8(&out.stdout)
-                .unwrap()
-                .trim()
-                .trim_left_matches("refs/heads/")
-                .to_string()
-        }
+    let branch = match communicate(&["git", "config", &format!("branch.{}.merge", local_branch)]) {
+        Ok(out) => str::from_utf8(&out.stdout)
+            .unwrap()
+            .trim()
+            .trim_left_matches("refs/heads/")
+            .to_string(),
         Err(_) => return None,
     };
 
@@ -162,29 +156,23 @@ pub fn get_changed_files(
         .ignore_filemode(true)
         .skip_binary_check(true)
         .enable_fast_untracked_dirs(true);
-    let diff = repo.diff_tree_to_tree(
-        parent.as_tree(),
-        current.as_tree(),
-        Some(&mut diff_options),
-    )?;
+    let diff =
+        repo.diff_tree_to_tree(parent.as_tree(), current.as_tree(), Some(&mut diff_options))?;
 
     let mut added = HashSet::<PathBuf>::new();
     let mut deleted = HashSet::<PathBuf>::new();
     let mut modified = HashSet::<PathBuf>::new();
-    diff.print(
-        git2::DiffFormat::NameStatus,
-        |_delte, _hunk, line| {
-            // line is 'A\tfile/path\n'
-            let path = PathBuf::from(str::from_utf8(&line.content()[2..]).unwrap().trim());
-            match line.content()[0] as char {
-                'A' => added.insert(path),
-                'D' => deleted.insert(path),
-                'M' => modified.insert(path),
-                unknown => panic!("Unexpected status char: {}", unknown),
-            };
-            true
-        },
-    )?;
+    diff.print(git2::DiffFormat::NameStatus, |_delte, _hunk, line| {
+        // line is 'A\tfile/path\n'
+        let path = PathBuf::from(str::from_utf8(&line.content()[2..]).unwrap().trim());
+        match line.content()[0] as char {
+            'A' => added.insert(path),
+            'D' => deleted.insert(path),
+            'M' => modified.insert(path),
+            unknown => panic!("Unexpected status char: {}", unknown),
+        };
+        true
+    })?;
     Ok((added, deleted, modified))
 }
 
@@ -201,10 +189,22 @@ fn run_clang_format(path: &Path) -> Result<()> {
     Ok(())
 }
 
+fn run_buildifier(path: &Path) -> Result<()> {
+    dispatch_to("buildifier", &[&path.to_string_lossy()])?;
+    Ok(())
+}
+
 fn run_rustfmt(path: &Path) -> Result<()> {
     dispatch_to(
-        "rustfmt",
-        &["--write-mode", "overwrite", &path.to_string_lossy()],
+        "rustup",
+        &[
+            "run",
+            "nightly",
+            "rustfmt",
+            "--write-mode",
+            "overwrite",
+            &path.to_string_lossy(),
+        ],
     )?;
     Ok(())
 }
@@ -223,14 +223,17 @@ pub fn handle_fix(args: &[&str], repo: &git2::Repository) -> Result<()> {
 
     let workdir = repo.workdir().unwrap();
     for path in added.union(&modified) {
-        if path.extension().is_none() {
+        if path.file_name().is_none() {
             continue;
         }
+        let file_name = path.file_name().unwrap().to_str().unwrap();
+        let ext = path.extension().and_then(|s| s.to_str()).unwrap_or("");
         let full_path = workdir.join(path);
 
-        match path.extension().and_then(|ext| ext.to_str()).unwrap() {
-            "h" | "cc" | "proto" => run_clang_format(&full_path)?,
-            "rs" => run_rustfmt(&full_path)?,
+        match (file_name, ext) {
+            (_, "h") | (_, "cc") | (_, "proto") => run_clang_format(&full_path)?,
+            (_, "rs") => run_rustfmt(&full_path)?,
+            ("BUILD", _) | (_, "BUILD") => run_buildifier(&full_path)?,
             _ => (),
         }
     }
@@ -264,15 +267,13 @@ pub fn handle_review_push(repo: &git2::Repository) -> Result<()> {
         let mut it = full_branch_name.splitn(2, '/');
         (it.next().unwrap(), it.next().unwrap())
     };
-    run_command(
-        &[
-            "git",
-            "push",
-            "--force",
-            user,
-            &format!("HEAD:{}", branch_name),
-        ],
-    )?;
+    run_command(&[
+        "git",
+        "push",
+        "--force",
+        user,
+        &format!("HEAD:{}", branch_name),
+    ])?;
     Ok(())
 }
 
@@ -301,15 +302,13 @@ pub fn handle_review(args: &[&str], repo: &git2::Repository) -> Result<()> {
             let master_origin = get_origin("master").unwrap();
             remotes[&master_origin.remote].project()
         };
-        run_command(
-            &[
-                "git",
-                "remote",
-                "add",
-                user,
-                &format!("git@github.com:{}/{}", user, project),
-            ],
-        )?;
+        run_command(&[
+            "git",
+            "remote",
+            "add",
+            user,
+            &format!("git@github.com:{}/{}", user, project),
+        ])?;
     }
 
     let local_branch_name = format!("{}/{}", user, branch);
@@ -319,15 +318,13 @@ pub fn handle_review(args: &[&str], repo: &git2::Repository) -> Result<()> {
 
     // Since the local_branch name is the remote/branch git also resolves it to the correct remote.
     run_command(&["git", "fetch", user])?;
-    run_command(
-        &[
-            "git",
-            "branch",
-            "--track",
-            &local_branch_name,
-            &local_branch_name,
-        ],
-    )?;
+    run_command(&[
+        "git",
+        "branch",
+        "--track",
+        &local_branch_name,
+        &local_branch_name,
+    ])?;
     run_command(&["git", "checkout", &local_branch_name])?;
     Ok(())
 }
