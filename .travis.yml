@@ -1,0 +1,64 @@
+# Based on the "trust" template v0.1.2
+# https://github.com/japaric/trust/tree/v0.1.2
+
+dist: trusty
+language: rust
+services: docker
+sudo: required
+
+env:
+  global:
+    - CRATE_NAME=giti
+
+matrix:
+  include:
+    # Linux
+    - env: TARGET=armv7-unknown-linux-gnueabihf
+    - env: TARGET=i686-unknown-linux-musl
+    - env: TARGET=x86_64-unknown-linux-musl
+
+    # OSX
+    - env: TARGET=x86_64-apple-darwin
+      os: osx
+
+before_install:
+  - set -e
+  - rustup self update
+
+install:
+  - sh ci/install.sh
+  - source ~/.cargo/env || true
+
+script:
+  - bash ci/script.sh
+
+after_script: set +e
+
+before_deploy:
+  - sh ci/before_deploy.sh
+
+deploy:
+  api_key:
+    secure: "j3NHOFuvnwbD3UykWCBbQVQ/iryODJlI8EPfnY8TzHg9PD661vt3cwzXzb0PF+xeygHQ6vFBJma9X/WQou68V3dAXJiPyBjQCMukKElfxplmnLZXQq1aGZo4byF4k2uNZUPWOEvQM7gNcPVGHHOSsIm6r4z39nNXVd/mkYSPRDejz14MStgVTXxPevIF93LvB2kAOaGwmQpupiBNFcWXufJzfLvky8NfX8l7ew/sBSslJ0HHbXyFqRek9j6ohb64WZF++lDQDEXFLbKvyUjGAp3a2+69+HJRujrKcSry8qnsI8v01IlcRZncouoyqEX3cHu0VkMZA/pCSCf3Cx2EC6hONt+3Y1Nvr3vb2QB3XuLqdkAwaC/DJLg7zBZLXeiuU5JAG4CWCrajKvIwd24yuvqjaaCYm1J+G+7VxUOD6mahdhvucdZuKep0FIy1wqHEDp57YyrRm7AS790P2NLYu5X6s6HfAj10z7LvXcrMdY79G8oDYyMWJG8f/2Y09hr35jsPoCPveMilI/utoPgJEQuq91R+xZgA8MqvH2YCS6dQwT9L/8DzASHm4wF93Ox7laPaaGcFiwMlpu3QDiaWn7cnnO3V32xLo70tV7EXlO622FMUo2Yej29ur5x93zzhc+7nuG9ZExO/J2XvuC0A7E2YuFncxzz/LkDNZE+KAds="
+  file_glob: true
+  file: $CRATE_NAME-$TRAVIS_TAG-$TARGET.*
+  on:
+    condition: $TRAVIS_RUST_VERSION = stable
+    tags: true
+  provider: releases
+  skip_cleanup: true
+
+cache: cargo
+before_cache:
+  # Travis can't cache files that are not readable by "others"
+  - chmod -R a+r $HOME/.cargo
+
+branches:
+  only:
+    # release tags
+    - /^v\d+\.\d+\.\d+.*$/
+    - master
+
+notifications:
+  email:
+    on_success: never
