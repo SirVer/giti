@@ -15,11 +15,11 @@ fn update() -> Result<(), Box<::std::error::Error>> {
         .target(&target)
         .bin_name("g")
         .show_download_progress(true)
+        .show_output(false)
         .no_confirm(true)
         .current_version(cargo_crate_version!())
         .build()?
         .update()?;
-    println!("Update status: `{}`!", status.version());
     Ok(())
 }
 
