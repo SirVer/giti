@@ -1,8 +1,9 @@
 [package]
 authors = ["Holger Rapp <HolgerRapp@gmx.net>"]
 name = "giti"
-version = "0.1.1"
+version = "0.1.4"
 
 [dependencies]
 git2 = "0.6.4"
+self_update = "0.4.2"
 term = "0.4.5"
