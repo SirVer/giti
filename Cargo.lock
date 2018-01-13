@@ -178,7 +178,7 @@ dependencies = [
 
 [[package]]
 name = "giti"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "git2 0.6.8 (registry+https://github.com/rust-lang/crates.io-index)",
  "self_update 0.4.2 (registry+https://github.com/rust-lang/crates.io-index)",

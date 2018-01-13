@@ -9,7 +9,7 @@ use std::process;
 
 fn update() -> Result<(), Box<::std::error::Error>> {
     let target = self_update::get_target()?;
-    let status = self_update::backends::github::Update::configure()?
+    self_update::backends::github::Update::configure()?
         .repo_owner("SirVer")
         .repo_name("giti")
         .target(&target)
