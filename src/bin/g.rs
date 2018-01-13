@@ -1,15 +1,36 @@
 extern crate giti;
 extern crate git2;
+#[macro_use] extern crate self_update;
 
 use giti::git;
 use giti::ErrorKind;
 use std::env;
 use std::process;
 
+fn update() -> Result<(), Box<::std::error::Error>> {
+    let target = self_update::get_target()?;
+    let status = self_update::backends::github::Update::configure()?
+        .repo_owner("SirVer")
+        .repo_name("giti")
+        .target(&target)
+        .bin_name("g")
+        .show_download_progress(true)
+        .no_confirm(true)
+        .current_version(cargo_crate_version!())
+        .build()?
+        .update()?;
+    println!("Update status: `{}`!", status.version());
+    Ok(())
+}
+
 fn main() {
     let args_owned: Vec<String> = env::args().collect();
     let args: Vec<&str> = args_owned.iter().map(|s| s as &str).collect();
 
+    if args.len() > 1 && args[1] == "--update" {
+        update().unwrap();
+        return;
+    }
     let result = git::handle_repository(&args[1..]);
 
     let exit_code = match result {
