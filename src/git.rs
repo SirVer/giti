@@ -145,8 +145,9 @@ pub fn get_changed_files(
     old: &str,
     new: &str,
 ) -> Result<(HashSet<PathBuf>, HashSet<PathBuf>, HashSet<PathBuf>)> {
-    let parent = repo.revparse_single(old)?.peel(git2::ObjectType::Tree)?;
-    let current = repo.revparse_single(new)?.peel(git2::ObjectType::Tree)?;
+    let parent = repo.revparse_single(old)?;
+    let current = repo.revparse_single(new)?;
+    let merge_base = repo.find_object(repo.merge_base(parent.id(), current.id())?, None)?;
 
     let mut diff_options = git2::DiffOptions::new();
     diff_options
@@ -157,7 +158,7 @@ pub fn get_changed_files(
         .skip_binary_check(true)
         .enable_fast_untracked_dirs(true);
     let diff =
-        repo.diff_tree_to_tree(parent.as_tree(), current.as_tree(), Some(&mut diff_options))?;
+        repo.diff_tree_to_tree(merge_base.peel(git2::ObjectType::Tree)?.as_tree(), current.peel(git2::ObjectType::Tree)?.as_tree(), Some(&mut diff_options))?;
 
     let mut added = HashSet::<PathBuf>::new();
     let mut deleted = HashSet::<PathBuf>::new();
