@@ -183,7 +183,8 @@ fn run_clang_format(path: &Path) -> Result<()> {
         &[
             "-i",
             "-sort-includes",
-            "-style=Google",
+            "-style=file",
+            "-fallback-style=Google",
             &path.to_string_lossy(),
         ],
     )?;
