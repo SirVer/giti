@@ -133,10 +133,7 @@ fn get_origin(local_branch: &str) -> Option<OriginBranch> {
         Err(_) => return None,
     };
 
-    Some(OriginBranch {
-        remote: remote,
-        branch: branch,
-    })
+    Some(OriginBranch { remote, branch })
 }
 
 /// Returns the (added, deleted, modified) files between two treeishs, e.g. branch names.
@@ -246,7 +243,7 @@ pub fn handle_fix(args: &[&str], repo: &git2::Repository) -> Result<()> {
         for filename in changed_files {
             println!("  {}", filename.to_string_lossy());
         }
-        println!("");
+        println!();
         dispatch_to("git", &["commit", "-am", "Ran git fix."])?;
     }
     Ok(())
@@ -255,7 +252,7 @@ pub fn handle_fix(args: &[&str], repo: &git2::Repository) -> Result<()> {
 pub fn handle_cleanup(repo: &git2::Repository) -> Result<()> {
     let current_branch = get_current_branch(repo);
     for branch in get_all_local_branches(repo)? {
-        if branch.find("/").is_some() && branch != current_branch {
+        if branch.find('/').is_some() && branch != current_branch {
             run_command(&["git", "branch", "-D", &branch])?;
         }
     }
@@ -333,7 +330,7 @@ pub fn handle_review(args: &[&str], repo: &git2::Repository) -> Result<()> {
 
 pub fn handle_repository(original_args: &[&str]) -> Result<()> {
     let repo = git2::Repository::discover(".");
-    if original_args.len() == 0 || repo.is_err() {
+    if original_args.is_empty() || repo.is_err() {
         return dispatch_to("git", original_args);
     }
 
