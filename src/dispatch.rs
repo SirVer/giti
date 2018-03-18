@@ -5,6 +5,7 @@ use std::process;
 
 use term;
 
+#[derive(Clone,Copy)]
 enum PrintCommands {
     YES,
     NO,
@@ -58,7 +59,7 @@ fn shell_out(program: &str, args: &[&str], print: PrintCommands) -> Result<()> {
     match print {
         PrintCommands::YES => {
             // An empty line to separate the different commands.
-            println!("")
+            println!()
         }
         PrintCommands::NO => (),
     }
