@@ -4,6 +4,6 @@ name = "giti"
 version = "0.2.3"
 
 [dependencies]
-git2 = "0.6.4"
+git2 = "0.7.0"
 self_update = "0.4.2"
-term = "0.4.5"
+term = "0.5.1"
