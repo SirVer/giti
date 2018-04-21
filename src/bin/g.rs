@@ -1,6 +1,7 @@
-extern crate giti;
 extern crate git2;
-#[macro_use] extern crate self_update;
+extern crate giti;
+#[macro_use]
+extern crate self_update;
 
 use giti::git;
 use giti::ErrorKind;

@@ -5,7 +5,7 @@ use std::process;
 
 use term;
 
-#[derive(Clone,Copy)]
+#[derive(Clone, Copy)]
 enum PrintCommands {
     YES,
     NO,
@@ -35,7 +35,6 @@ fn shell_out(program: &str, args: &[&str], print: PrintCommands) -> Result<()> {
             write!(terminal, "=> Running: {} {}", program, args.join(" ")).unwrap();
             terminal.reset().unwrap();
             writeln!(terminal, "").unwrap();
-
         }
         PrintCommands::NO => {}
     }
@@ -51,9 +50,10 @@ fn shell_out(program: &str, args: &[&str], print: PrintCommands) -> Result<()> {
     let result = match child.wait().unwrap().code() {
         Some(0) => Ok(()),
         Some(a) => Err(Error::subcommand_fail(program, a)),
-        None => Err(Error::general(
-            format!("{} was terminated by a signal.", program),
-        )),
+        None => Err(Error::general(format!(
+            "{} was terminated by a signal.",
+            program
+        ))),
     };
 
     match print {

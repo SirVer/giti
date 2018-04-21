@@ -5,6 +5,7 @@ use git2;
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::str;
+use github;
 
 /// Parses git's configuration and extracts all aliases that do not shell out. Returns (key, value)
 /// representations.
@@ -48,6 +49,19 @@ impl Remote {
     /// 'giti.git'.
     pub fn project(&self) -> &str {
         self.url.rsplitn(2, '/').nth(0).unwrap()
+    }
+
+    pub fn repository(&self) -> github::Repo {
+        let owner_and_project = self.url.rsplitn(2, ':').nth(0).unwrap();
+        let owner = owner_and_project.rsplitn(2, '/').nth(1).unwrap();
+        let mut name = owner_and_project.rsplitn(2, '/').nth(0).unwrap();
+        if name.ends_with(".git") {
+            name = &name[..name.len() - 4];
+        }
+        github::Repo {
+            owner: owner.to_string(),
+            name: name.to_string(),
+        }
     }
 }
 
@@ -154,8 +168,11 @@ pub fn get_changed_files(
         .ignore_filemode(true)
         .skip_binary_check(true)
         .enable_fast_untracked_dirs(true);
-    let diff =
-        repo.diff_tree_to_tree(merge_base.peel(git2::ObjectType::Tree)?.as_tree(), current.peel(git2::ObjectType::Tree)?.as_tree(), Some(&mut diff_options))?;
+    let diff = repo.diff_tree_to_tree(
+        merge_base.peel(git2::ObjectType::Tree)?.as_tree(),
+        current.peel(git2::ObjectType::Tree)?.as_tree(),
+        Some(&mut diff_options),
+    )?;
 
     let mut added = HashSet::<PathBuf>::new();
     let mut deleted = HashSet::<PathBuf>::new();
@@ -277,13 +294,38 @@ pub fn handle_review_push(repo: &git2::Repository) -> Result<()> {
 }
 
 pub fn handle_review(args: &[&str], repo: &git2::Repository) -> Result<()> {
-    expect_working_directory_clean()?;
+    let remotes = get_remotes()?;
+
+    if args.len() == 1 {
+        let repo = match remotes.get("origin") {
+            None => {
+                return Err(Error::general(
+                    "No origin remote. No idea what repo I am in.".into(),
+                ))
+            }
+            Some(remote) => remote.repository(),
+        };
+        let prs = github::find_assigned_prs(&repo)?;
+        if prs.is_empty() {
+            println!("No reviews assigned in {}/{}.", repo.owner, repo.name);
+        } else {
+            for pr in &prs {
+                println!(
+                    "#{:4} by @{}: {} ({}:{})",
+                    pr.number, pr.author_login, pr.title, pr.source.repo.owner, pr.source.name
+                );
+            }
+        }
+        return Ok(());
+    }
 
     if args.len() != 2 {
         return Err(Error::general(
             "review requires a user/branch_name to review.".into(),
         ));
     }
+
+    expect_working_directory_clean()?;
 
     if args[1] == "push" {
         return handle_review_push(repo);
@@ -295,7 +337,6 @@ pub fn handle_review(args: &[&str], repo: &git2::Repository) -> Result<()> {
     };
 
     // Make sure the remote is available.
-    let remotes = get_remotes()?;
     if !remotes.contains_key(user) {
         let project = {
             let master_origin = get_origin("master").unwrap();
