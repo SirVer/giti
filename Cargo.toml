@@ -1,7 +1,7 @@
 [package]
 authors = ["Holger Rapp <HolgerRapp@gmx.net>"]
 name = "giti"
-version = "0.2.4"
+version = "0.2.5"
 
 [dependencies]
 git2 = "0.7.0"
