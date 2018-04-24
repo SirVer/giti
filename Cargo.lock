@@ -287,7 +287,7 @@ dependencies = [
 
 [[package]]
 name = "giti"
-version = "0.2.5"
+version = "0.2.6"
 dependencies = [
  "futures 0.1.21 (registry+https://github.com/rust-lang/crates.io-index)",
  "futures-await 0.1.1 (registry+https://github.com/rust-lang/crates.io-index)",
