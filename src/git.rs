@@ -349,36 +349,25 @@ pub fn handle_review(args: &[&str], repo: &git2::Repository) -> Result<()> {
         }
     };
 
-    let (branch_to_fork, local_branch) = if source_branch.repo == github_repo {
-        // This is a branch in our 'origin' that we want to review.
-        run_command(&["git", "fetch", "origin"])?;
-        let branch_to_fork = format!("remotes/origin/{}", source_branch.name);
-        let local_branch = format!("|{}", source_branch.name);
-        (branch_to_fork, local_branch)
+    let owner = if source_branch.repo == github_repo {
+        "origin"
     } else {
-        // This is a branch in somebody's fork. Make sure the remote is available.
-        if !remotes.contains_key(&source_branch.repo.owner) {
-            run_command(&[
-                "git",
-                "remote",
-                "add",
-                &source_branch.repo.owner,
-                &format!(
-                    "git@github.com:{}/{}",
-                    source_branch.repo.owner,
-                    master_remote.project()
-                ),
-            ])?;
-        }
-        // Since the local_branch name is the remote/branch git also resolves it to the correct remote.
-        run_command(&["git", "fetch", &source_branch.repo.owner])?;
-        let branch_to_fork = format!(
-            "remotes/{}/{}",
-            source_branch.repo.owner, source_branch.name
-        );
-        let local_branch = format!("|{}/{}", source_branch.repo.owner, source_branch.name);
-        (branch_to_fork, local_branch)
+        &source_branch.repo.owner
     };
+
+    if !remotes.contains_key(owner) {
+        run_command(&[
+            "git",
+            "remote",
+            "add",
+            owner,
+            &format!("git@github.com:{}/{}", owner, master_remote.project()),
+        ])?;
+    }
+    // Since the local_branch name is the remote/branch git also resolves it to the correct remote.
+    run_command(&["git", "fetch", owner])?;
+    let branch_to_fork = format!("remotes/{}/{}", owner, source_branch.name);
+    let local_branch = format!("|{}/{}", owner, source_branch.name);
 
     if get_all_local_branches(repo)?.contains(&local_branch) {
         run_command(&["git", "branch", "-D", &local_branch])?;
