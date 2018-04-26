@@ -269,7 +269,7 @@ pub fn handle_fix(args: &[&str], repo: &git2::Repository) -> Result<()> {
 pub fn handle_cleanup(repo: &git2::Repository) -> Result<()> {
     let current_branch = get_current_branch(repo);
     for branch in get_all_local_branches(repo)? {
-        if branch.find('/').is_some() && branch != current_branch {
+        if branch.starts_with('|') && branch != current_branch {
             run_command(&["git", "branch", "-D", &branch])?;
         }
     }
@@ -281,7 +281,8 @@ pub fn handle_review_push(repo: &git2::Repository) -> Result<()> {
     let full_branch_name = get_current_branch(repo);
     let (user, branch_name) = {
         let mut it = full_branch_name.splitn(2, '/');
-        (it.next().unwrap(), it.next().unwrap())
+        // Slice off the leading '|'
+        (&it.next().unwrap()[1..], it.next().unwrap())
     };
     run_command(&[
         "git",
@@ -296,22 +297,21 @@ pub fn handle_review_push(repo: &git2::Repository) -> Result<()> {
 pub fn handle_review(args: &[&str], repo: &git2::Repository) -> Result<()> {
     let remotes = get_remotes()?;
 
+    let master_origin = get_origin("master").unwrap();
+    let master_remote = &remotes[&master_origin.remote];
+    let github_repo = master_remote.repository();
+
     if args.len() == 1 {
-        let repo = match remotes.get("origin") {
-            None => {
-                return Err(Error::general(
-                    "No origin remote. No idea what repo I am in.".into(),
-                ))
-            }
-            Some(remote) => remote.repository(),
-        };
-        let prs = github::find_assigned_prs(&repo)?;
+        let prs = github::find_assigned_prs(&github_repo)?;
         if prs.is_empty() {
-            println!("No reviews assigned in {}/{}.", repo.owner, repo.name);
+            println!(
+                "No reviews assigned in {}/{}.",
+                github_repo.owner, github_repo.name
+            );
         } else {
             for pr in &prs {
                 println!(
-                    "#{:4} by @{}: {} ({}:{})",
+                    "#{} by @{}: {} ({}:{})",
                     pr.number, pr.author_login, pr.title, pr.source.repo.owner, pr.source.name
                 );
             }
@@ -321,7 +321,7 @@ pub fn handle_review(args: &[&str], repo: &git2::Repository) -> Result<()> {
 
     if args.len() != 2 {
         return Err(Error::general(
-            "review requires a user/branch_name to review.".into(),
+            "review requires a pull request number or a user/branch_name to review.".into(),
         ));
     }
 
@@ -331,41 +331,61 @@ pub fn handle_review(args: &[&str], repo: &git2::Repository) -> Result<()> {
         return handle_review_push(repo);
     }
 
-    let (user, branch) = {
-        let mut it = args[1].splitn(2, ':');
-        (it.next().unwrap(), it.next().unwrap())
+    let source_branch = if let Ok(pr_number) = args[1].parse::<i32>() {
+        let pr = github::get_pr(&github_repo, pr_number)?;
+        pr.source
+    } else {
+        let (user, branch) = {
+            let mut it = args[1].splitn(2, ':');
+            (it.next().unwrap(), it.next().unwrap())
+        };
+
+        github::Branch {
+            repo: github::Repo {
+                owner: user.to_string(),
+                name: github_repo.name.clone(),
+            },
+            name: branch.to_string(),
+        }
     };
 
-    // Make sure the remote is available.
-    if !remotes.contains_key(user) {
-        let project = {
-            let master_origin = get_origin("master").unwrap();
-            remotes[&master_origin.remote].project()
-        };
-        run_command(&[
-            "git",
-            "remote",
-            "add",
-            user,
-            &format!("git@github.com:{}/{}", user, project),
-        ])?;
+    let (branch_to_fork, local_branch) = if source_branch.repo == github_repo {
+        // This is a branch in our 'origin' that we want to review.
+        run_command(&["git", "fetch", "origin"])?;
+        let branch_to_fork = format!("remotes/origin/{}", source_branch.name);
+        let local_branch = format!("|{}", source_branch.name);
+        (branch_to_fork, local_branch)
+    } else {
+        // This is a branch in somebody's fork. Make sure the remote is available.
+        if !remotes.contains_key(&source_branch.repo.owner) {
+            run_command(&[
+                "git",
+                "remote",
+                "add",
+                &source_branch.repo.owner,
+                &format!(
+                    "git@github.com:{}/{}",
+                    source_branch.repo.owner,
+                    master_remote.project()
+                ),
+            ])?;
+        }
+        // Since the local_branch name is the remote/branch git also resolves it to the correct remote.
+        run_command(&["git", "fetch", &source_branch.repo.owner])?;
+        let branch_to_fork = format!(
+            "remotes/{}/{}",
+            source_branch.repo.owner, source_branch.name
+        );
+        let local_branch = format!("|{}/{}", source_branch.repo.owner, source_branch.name);
+        (branch_to_fork, local_branch)
+    };
+
+    if get_all_local_branches(repo)?.contains(&local_branch) {
+        run_command(&["git", "branch", "-D", &local_branch])?;
     }
 
-    let local_branch_name = format!("{}/{}", user, branch);
-    if get_all_local_branches(repo)?.contains(&local_branch_name) {
-        run_command(&["git", "branch", "-D", &local_branch_name])?;
-    }
-
-    // Since the local_branch name is the remote/branch git also resolves it to the correct remote.
-    run_command(&["git", "fetch", user])?;
-    run_command(&[
-        "git",
-        "branch",
-        "--track",
-        &local_branch_name,
-        &local_branch_name,
-    ])?;
-    run_command(&["git", "checkout", &local_branch_name])?;
+    run_command(&["git", "branch", "--track", &local_branch, &branch_to_fork])?;
+    run_command(&["git", "checkout", &local_branch])?;
     Ok(())
 }
 
