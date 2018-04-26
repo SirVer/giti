@@ -41,7 +41,7 @@ pub struct PullRequest {
     pub title: String,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Repo {
     pub owner: String,
     pub name: String,
@@ -121,4 +121,24 @@ pub fn find_assigned_prs(repo: &Repo) -> Result<Vec<PullRequest>> {
         .collect::<Vec<_>>();
 
     Ok(result)
+}
+
+pub fn get_pr(repo: &Repo, pr: i32) -> Result<PullRequest> {
+    let token = env::var("GITHUB_TOKEN")?;
+
+    let mut core = Core::new().expect("reactor fail");
+    let github = Github::new(
+        "SirVer_giti/unspecified",
+        Some(Credentials::Token(token)),
+        &core.handle(),
+    );
+
+    let pr = core.run(fetch_pr(github, repo.clone(), pr as u64))?;
+    Ok(PullRequest {
+        source: Branch::from_label(&repo.name, &pr.head.label),
+        target: Branch::from_label(&repo.name, &pr.base.label),
+        number: pr.number as i32,
+        author_login: pr.user.login.clone(),
+        title: pr.title.clone(),
+    })
 }
