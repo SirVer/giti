@@ -2,7 +2,7 @@ use hubcaps::search::SearchIssuesOptions;
 use hubcaps::{self, Credentials};
 use tokio_core::reactor::Core;
 use std::env;
-use futures::prelude::*;
+use futures::{self, prelude::*};
 use hyper;
 use error::*;
 use hyper_tls;
@@ -69,20 +69,13 @@ fn find_assigned_pr_info(
         &SearchIssuesOptions::builder().per_page(25).build(),
     );
 
-    // TODO(sirver): I am actually not sure if this is actually faster than just await!() in the
-    // loop?
     let mut requests = vec![];
     #[async]
     for result in search {
-        requests.push(fetch_pr(github.clone(), repo.clone(), result.number));
+        let mut future = fetch_pr(github.clone(), repo.clone(), result.number);
+        requests.push(future);
     }
-
-    let mut items = vec![];
-    for r in requests {
-        let res = await!(r)?;
-        items.push(res);
-    }
-    Ok(items)
+    Ok(await!(futures::future::join_all(requests))?)
 }
 
 #[async]
