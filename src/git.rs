@@ -1,12 +1,12 @@
-use Error;
-use Result;
 use dispatch::{communicate, dispatch_to, run_command};
 use git2;
+use github;
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::str;
-use github;
 use webbrowser;
+use Error;
+use Result;
 
 /// Parses git's configuration and extracts all aliases that do not shell out. Returns (key, value)
 /// representations.
@@ -389,7 +389,10 @@ pub fn handle_open_reviews(args: &[&str]) -> Result<()> {
     let prs = github::find_assigned_prs(None)?;
     for pr in prs {
         // Ignore the result.
-        let _ = webbrowser::open(&format!("{}{}/{}/{}", args[1], pr.target.repo.owner, pr.target.repo.name, pr.number));
+        let _ = webbrowser::open(&format!(
+            "{}{}/{}/{}",
+            args[1], pr.target.repo.owner, pr.target.repo.name, pr.number
+        ));
     }
     Ok(())
 }

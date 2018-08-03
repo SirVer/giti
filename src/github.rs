@@ -1,11 +1,11 @@
+use error::*;
+use futures::{self, prelude::*};
 use hubcaps::search::SearchIssuesOptions;
 use hubcaps::{self, Credentials};
-use tokio_core::reactor::Core;
-use std::env;
-use futures::{self, prelude::*};
 use hyper;
-use error::*;
 use hyper_tls;
+use std::env;
+use tokio_core::reactor::Core;
 use url;
 
 // TODO(sirver): This state of async/await only allowed static references or owning data. So there
@@ -60,21 +60,28 @@ pub fn repo_tuple(repository_url: &str) -> (String, String) {
 }
 
 #[async]
-fn fetch_pr(github: Github, repo: Repo, number: u64) -> hubcaps::Result<(Repo, hubcaps::pulls::Pull)> {
-    let res = await!(github.repo(repo.owner.to_string(), repo.name.to_string()).pulls().get(number).get())?;
+fn fetch_pr(
+    github: Github,
+    repo: Repo,
+    number: u64,
+) -> hubcaps::Result<(Repo, hubcaps::pulls::Pull)> {
+    let res = await!(
+        github
+            .repo(repo.owner.to_string(), repo.name.to_string())
+            .pulls()
+            .get(number)
+            .get()
+    )?;
     Ok((repo, res))
 }
 
 #[async]
 fn find_assigned_pr_info(
     github: Github,
-    login: String
+    login: String,
 ) -> hubcaps::Result<Vec<(Repo, hubcaps::pulls::Pull)>> {
     let search = github.search().issues().iter(
-        format!(
-            "is:pr is:open archived:false assignee:{}",
-            login,
-        ),
+        format!("is:pr is:open archived:false assignee:{}", login,),
         &SearchIssuesOptions::builder().per_page(25).build(),
     );
 
@@ -114,19 +121,18 @@ pub fn find_assigned_prs(repo: Option<&Repo>) -> Result<Vec<PullRequest>> {
     let mut prs = core.run(run(github.clone()))?;
     prs.sort_by_key(|(_, pr)| pr.number);
 
-    let result = prs.iter()
+    let result = prs
+        .iter()
         .filter(|(pr_repo, _)| match repo {
             None => true,
             Some(ref r) => pr_repo == *r,
-        })
-        .map(|(pr_repo, pr)| PullRequest {
+        }).map(|(pr_repo, pr)| PullRequest {
             source: Branch::from_label(&pr_repo.name, &pr.head.label),
             target: Branch::from_label(&pr_repo.name, &pr.base.label),
             number: pr.number as i32,
             author_login: pr.user.login.clone(),
             title: pr.title.clone(),
-        })
-        .collect::<Vec<_>>();
+        }).collect::<Vec<_>>();
 
     Ok(result)
 }
