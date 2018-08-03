@@ -7,6 +7,8 @@ extern crate hyper;
 extern crate hyper_tls;
 extern crate term;
 extern crate tokio_core;
+extern crate url;
+extern crate webbrowser;
 
 pub mod dispatch;
 pub mod error;

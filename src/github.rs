@@ -6,6 +6,7 @@ use futures::{self, prelude::*};
 use hyper;
 use error::*;
 use hyper_tls;
+use url;
 
 // TODO(sirver): This state of async/await only allowed static references or owning data. So there
 // is lots of cloning going on here.
@@ -49,22 +50,30 @@ pub struct Repo {
 
 type Github = hubcaps::Github<hyper_tls::HttpsConnector<hyper::client::HttpConnector>>;
 
+// bug fixed version from hubcaps: http://lessis.me/hubcaps/src/hubcaps/search/mod.rs.html#229-235
+pub fn repo_tuple(repository_url: &str) -> (String, String) {
+    // split the last two elements off the repo url path
+    let parsed = url::Url::parse(&repository_url).unwrap();
+    let mut path = parsed.path().split('/').collect::<Vec<_>>();
+    path.reverse();
+    (path[1].to_owned(), path[0].to_owned())
+}
+
 #[async]
-fn fetch_pr(github: Github, repo: Repo, number: u64) -> hubcaps::Result<hubcaps::pulls::Pull> {
-    let res = await!(github.repo(repo.owner, repo.name).pulls().get(number).get())?;
-    Ok(res)
+fn fetch_pr(github: Github, repo: Repo, number: u64) -> hubcaps::Result<(Repo, hubcaps::pulls::Pull)> {
+    let res = await!(github.repo(repo.owner.to_string(), repo.name.to_string()).pulls().get(number).get())?;
+    Ok((repo, res))
 }
 
 #[async]
 fn find_assigned_pr_info(
     github: Github,
-    login: String,
-    repo: Repo,
-) -> hubcaps::Result<Vec<hubcaps::pulls::Pull>> {
+    login: String
+) -> hubcaps::Result<Vec<(Repo, hubcaps::pulls::Pull)>> {
     let search = github.search().issues().iter(
         format!(
-            "is:pr is:open archived:false assignee:{} repo:{}/{}",
-            login, repo.owner, repo.name
+            "is:pr is:open archived:false assignee:{}",
+            login,
         ),
         &SearchIssuesOptions::builder().per_page(25).build(),
     );
@@ -72,7 +81,9 @@ fn find_assigned_pr_info(
     let mut requests = vec![];
     #[async]
     for result in search {
-        let mut future = fetch_pr(github.clone(), repo.clone(), result.number);
+        let (owner, name) = repo_tuple(&result.repository_url);
+        let repo = Repo { owner, name };
+        let mut future = fetch_pr(github.clone(), repo, result.number);
         requests.push(future);
     }
     Ok(await!(futures::future::join_all(requests))?)
@@ -84,13 +95,13 @@ fn find_login_name(github: Github) -> hubcaps::Result<String> {
 }
 
 #[async]
-fn run(github: Github, repo: Repo) -> hubcaps::Result<Vec<hubcaps::pulls::Pull>> {
+fn run(github: Github) -> hubcaps::Result<Vec<(Repo, hubcaps::pulls::Pull)>> {
     let login = await!(find_login_name(github.clone()))?;
-    let res = await!(find_assigned_pr_info(github.clone(), login, repo))?;
+    let res = await!(find_assigned_pr_info(github.clone(), login))?;
     Ok(res)
 }
 
-pub fn find_assigned_prs(repo: &Repo) -> Result<Vec<PullRequest>> {
+pub fn find_assigned_prs(repo: Option<&Repo>) -> Result<Vec<PullRequest>> {
     let token = env::var("GITHUB_TOKEN")?;
 
     let mut core = Core::new().expect("reactor fail");
@@ -100,13 +111,17 @@ pub fn find_assigned_prs(repo: &Repo) -> Result<Vec<PullRequest>> {
         &core.handle(),
     );
 
-    let mut prs = core.run(run(github.clone(), repo.clone()))?;
-    prs.sort_by_key(|pr| pr.number);
+    let mut prs = core.run(run(github.clone()))?;
+    prs.sort_by_key(|(_, pr)| pr.number);
 
     let result = prs.iter()
-        .map(|pr| PullRequest {
-            source: Branch::from_label(&repo.name, &pr.head.label),
-            target: Branch::from_label(&repo.name, &pr.base.label),
+        .filter(|(pr_repo, _)| match repo {
+            None => true,
+            Some(ref r) => pr_repo == *r,
+        })
+        .map(|(pr_repo, pr)| PullRequest {
+            source: Branch::from_label(&pr_repo.name, &pr.head.label),
+            target: Branch::from_label(&pr_repo.name, &pr.base.label),
             number: pr.number as i32,
             author_login: pr.user.login.clone(),
             title: pr.title.clone(),
@@ -126,7 +141,7 @@ pub fn get_pr(repo: &Repo, pr: i32) -> Result<PullRequest> {
         &core.handle(),
     );
 
-    let pr = core.run(fetch_pr(github, repo.clone(), pr as u64))?;
+    let (_, pr) = core.run(fetch_pr(github, repo.clone(), pr as u64))?;
     Ok(PullRequest {
         source: Branch::from_label(&repo.name, &pr.head.label),
         target: Branch::from_label(&repo.name, &pr.base.label),
