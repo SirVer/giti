@@ -6,6 +6,7 @@ use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::str;
 use github;
+use webbrowser;
 
 /// Parses git's configuration and extracts all aliases that do not shell out. Returns (key, value)
 /// representations.
@@ -302,7 +303,7 @@ pub fn handle_review(args: &[&str], repo: &git2::Repository) -> Result<()> {
     let github_repo = master_remote.repository();
 
     if args.len() == 1 {
-        let prs = github::find_assigned_prs(&github_repo)?;
+        let prs = github::find_assigned_prs(Some(&github_repo))?;
         if prs.is_empty() {
             println!(
                 "No reviews assigned in {}/{}.",
@@ -378,6 +379,21 @@ pub fn handle_review(args: &[&str], repo: &git2::Repository) -> Result<()> {
     Ok(())
 }
 
+pub fn handle_open_reviews(args: &[&str]) -> Result<()> {
+    if args.len() != 2 {
+        return Err(Error::general(
+            "open_reviews requires a base url as first argument.".into(),
+        ));
+    }
+
+    let prs = github::find_assigned_prs(None)?;
+    for pr in prs {
+        // Ignore the result.
+        let _ = webbrowser::open(&format!("{}{}/{}/{}", args[1], pr.target.repo.owner, pr.target.repo.name, pr.number));
+    }
+    Ok(())
+}
+
 pub fn handle_repository(original_args: &[&str]) -> Result<()> {
     let repo = git2::Repository::discover(".");
     if original_args.is_empty() || repo.is_err() {
@@ -391,6 +407,7 @@ pub fn handle_repository(original_args: &[&str]) -> Result<()> {
         "cleanup" => handle_cleanup(&repo),
         "fix" => handle_fix(original_args, &repo),
         "review" => handle_review(original_args, &repo),
+        "open_reviews" => handle_open_reviews(original_args),
 
         _ => dispatch_to("git", original_args),
     }
