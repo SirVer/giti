@@ -395,11 +395,21 @@ pub fn handle_open_reviews(args: &[&str]) -> Result<()> {
 }
 
 pub fn handle_repository(original_args: &[&str]) -> Result<()> {
-    let repo = git2::Repository::discover(".");
-    if original_args.is_empty() || repo.is_err() {
+    if original_args.is_empty() {
         return dispatch_to("git", original_args);
     }
 
+    // Arguments that are valid without a git repository.
+    match original_args[0] as &str {
+        // Intercepted commands.
+        "open_reviews" => return handle_open_reviews(original_args),
+        _ => (),
+    };
+
+    let repo = git2::Repository::discover(".");
+    if repo.is_err() {
+        return dispatch_to("git", original_args);
+    }
     let repo = repo.unwrap();
 
     match original_args[0] as &str {
@@ -407,7 +417,6 @@ pub fn handle_repository(original_args: &[&str]) -> Result<()> {
         "cleanup" => handle_cleanup(&repo),
         "fix" => handle_fix(original_args, &repo),
         "review" => handle_review(original_args, &repo),
-        "open_reviews" => handle_open_reviews(original_args),
 
         _ => dispatch_to("git", original_args),
     }
