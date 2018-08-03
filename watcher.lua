@@ -18,7 +18,7 @@ return {
       -- },
       {
         name = "Cargo build [release]",
-        command = "cargo +nightly build --release --color=always",
+        command = "cargo build --release --color=always",
       },
     },
     should_run = is_rust,
