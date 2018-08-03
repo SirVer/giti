@@ -1,5 +1,4 @@
 /// Tools to shell out to external commands.
-
 use super::error::{Error, Result};
 use std::process;
 
