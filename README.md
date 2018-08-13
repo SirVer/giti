@@ -17,6 +17,9 @@ For Bash, put this in your `.bashrc`:
     _completion_loader git
     complete -o bashdefault -o default -o nospace -F _git g
 
+On Linux, you might need to set `SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt` for the tool to work properly.
+This is due to differences where SSL certs are saved in Debian and Ubuntu.
+
 # Running fix commands
 
 When running `g fix`, the tool will figure out which files have changed compared
@@ -40,3 +43,4 @@ Simply run `g --update` to self update the binary to the latest release.
     brew install libssh2 openssl@1.1
     export PKG_CONFIG_PATH="/usr/local/opt/openssl/lib/pkgconfig"
     cargo build --release
+
