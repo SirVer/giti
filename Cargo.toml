@@ -2,16 +2,17 @@
 authors = ["Holger Rapp <HolgerRapp@gmx.net>"]
 name = "giti"
 version = "0.3.1"
+edition = "2018"
 
 [dependencies]
 git2 = "0.7.0"
 self_update = "0.4.2"
 term = "0.5.1"
-hubcaps = "0.4.5"
-tokio-core = "0.1.17"
-hyper = "0.11.25"
-hyper-tls = "0.1.2"
-futures = "0.1.0"
-futures-await = "0.1"
+hubcaps = "0.5.0"
+hyper = "0.12.17"
+hyper-tls = "0.3.1"
 url = "1.7.1"
 webbrowser = "0.3.1"
+futures = "0.1.25"
+tokio = { version = "0.1.13", features = ["async-await-preview"] }
+tokio-async-await = "0.1.4"
