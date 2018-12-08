@@ -1,5 +1,5 @@
 use error::*;
-use futures::{self, prelude::*};
+use futures::{self, prelude::*, prelude::await};
 use hubcaps::search::SearchIssuesOptions;
 use hubcaps::{self, Credentials};
 use hyper;
