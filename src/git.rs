@@ -1,12 +1,12 @@
-use dispatch::{communicate, dispatch_to, run_command};
+use crate::dispatch::{communicate, dispatch_to, run_command};
 use git2;
-use github;
+use crate::github;
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::str;
 use webbrowser;
-use Error;
-use Result;
+use crate::Error;
+use crate::Result;
 
 /// Parses git's configuration and extracts all aliases that do not shell out. Returns (key, value)
 /// representations.

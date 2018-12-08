@@ -1,11 +1,15 @@
-use error::*;
-use futures::{self, prelude::*, prelude::await};
+// Extremely helpful was this: https://jsdw.me/posts/rust-asyncawait-preview/
+
+use crate::error::*;
 use hubcaps::search::SearchIssuesOptions;
 use hubcaps::{self, Credentials};
 use hyper;
 use hyper_tls;
 use std::env;
-use tokio_core::reactor::Core;
+use tokio::await;
+use tokio::prelude::*;
+use tokio_async_await::compat::forward::IntoAwaitable;
+use tokio_async_await::compat::backward::Compat;
 use url;
 
 // TODO(sirver): This state of async/await only allowed static references or owning data. So there
@@ -59,8 +63,7 @@ pub fn repo_tuple(repository_url: &str) -> (String, String) {
     (path[1].to_owned(), path[0].to_owned())
 }
 
-#[async]
-fn fetch_pr(
+async fn fetch_pr(
     github: Github,
     repo: Repo,
     number: u64,
@@ -75,34 +78,35 @@ fn fetch_pr(
     Ok((repo, res))
 }
 
-#[async]
-fn find_assigned_pr_info(
+async fn find_assigned_pr_info(
     github: Github,
     login: String,
 ) -> hubcaps::Result<Vec<(Repo, hubcaps::pulls::Pull)>> {
-    let search = github.search().issues().iter(
+    let mut search = github.search().issues().iter(
         format!("is:pr is:open archived:false assignee:{}", login,),
         &SearchIssuesOptions::builder().per_page(25).build(),
     );
 
-    let mut requests = vec![];
-    #[async]
-    for result in search {
+    let mut futures = vec![];
+    while let Some(Ok(result)) = await!(search.next()) {
         let (owner, name) = repo_tuple(&result.repository_url);
         let repo = Repo { owner, name };
-        let mut future = fetch_pr(github.clone(), repo, result.number);
-        requests.push(future);
+        futures.push(Compat::new(fetch_pr(github.clone(), repo, result.number)));
     }
-    Ok(await!(futures::future::join_all(requests))?)
+
+    let mut results = vec![];
+    for rv in await!(tokio::prelude::future::join_all(futures))? {
+        results.push(rv);
+    }
+    Ok(results)
 }
 
-#[async]
-fn find_login_name(github: Github) -> hubcaps::Result<String> {
+async fn find_login_name(github: Github) -> hubcaps::Result<String> {
     Ok(await!(github.users().authenticated())?.login)
 }
 
-#[async]
-fn run(github: Github) -> hubcaps::Result<Vec<(Repo, hubcaps::pulls::Pull)>> {
+
+async fn run(github: Github) -> hubcaps::Result<Vec<(Repo, hubcaps::pulls::Pull)>> {
     let login = await!(find_login_name(github.clone()))?;
     let res = await!(find_assigned_pr_info(github.clone(), login))?;
     Ok(res)
@@ -111,43 +115,50 @@ fn run(github: Github) -> hubcaps::Result<Vec<(Repo, hubcaps::pulls::Pull)>> {
 pub fn find_assigned_prs(repo: Option<&Repo>) -> Result<Vec<PullRequest>> {
     let token = env::var("GITHUB_TOKEN")?;
 
-    let mut core = Core::new().expect("reactor fail");
-    let github = Github::new(
-        "SirVer_giti/unspecified",
-        Some(Credentials::Token(token)),
-        &core.handle(),
-    );
+    let repo = repo.map(|r| r.clone());
+    let (tx, rx) = ::std::sync::mpsc::channel();
+    let tx = ::std::sync::Mutex::new(tx);
+    tokio::run_async(async move {
+        let github = Github::new(
+            "SirVer_giti/unspecified",
+            Some(Credentials::Token(token)));
+        let mut prs = await!(run(github.clone())).expect("run() did not succeed.");
+        prs.sort_by_key(|(_, pr)| pr.number);
 
-    let mut prs = core.run(run(github.clone()))?;
-    prs.sort_by_key(|(_, pr)| pr.number);
+        let new_result = prs
+            .iter()
+            .filter(|(pr_repo, _)| match repo {
+                None => true,
+                Some(ref r) => pr_repo == r,
+            }).map(|(pr_repo, pr)| PullRequest {
+                source: Branch::from_label(&pr_repo.name, &pr.head.label),
+                target: Branch::from_label(&pr_repo.name, &pr.base.label),
+                number: pr.number as i32,
+                author_login: pr.user.login.clone(),
+                title: pr.title.clone(),
+            }).collect::<Vec<_>>();
+        tx.lock().unwrap().send(new_result).unwrap();
+    });
 
-    let result = prs
-        .iter()
-        .filter(|(pr_repo, _)| match repo {
-            None => true,
-            Some(ref r) => pr_repo == *r,
-        }).map(|(pr_repo, pr)| PullRequest {
-            source: Branch::from_label(&pr_repo.name, &pr.head.label),
-            target: Branch::from_label(&pr_repo.name, &pr.base.label),
-            number: pr.number as i32,
-            author_login: pr.user.login.clone(),
-            title: pr.title.clone(),
-        }).collect::<Vec<_>>();
-
-    Ok(result)
+    Ok(rx.recv().unwrap())
 }
 
-pub fn get_pr(repo: &Repo, pr: i32) -> Result<PullRequest> {
+pub fn get_pr(repo: &Repo, pr_id: i32) -> Result<PullRequest> {
     let token = env::var("GITHUB_TOKEN")?;
 
-    let mut core = Core::new().expect("reactor fail");
-    let github = Github::new(
-        "SirVer_giti/unspecified",
-        Some(Credentials::Token(token)),
-        &core.handle(),
-    );
+    let (tx, rx) = ::std::sync::mpsc::channel();
+    let tx = ::std::sync::Mutex::new(tx);
+    let repo_clone = repo.clone();
+    tokio::run_async(async move {
+        let github = Github::new(
+            "SirVer_giti/unspecified",
+            Some(Credentials::Token(token)));
+        let (_, pr) = await!(fetch_pr(github, repo_clone, pr_id as u64)).expect("fetch_pr did not complete.");
+        tx.lock().unwrap().send(pr).unwrap();
+    });
 
-    let (_, pr) = core.run(fetch_pr(github, repo.clone(), pr as u64))?;
+    let pr = rx.recv().unwrap();
+
     Ok(PullRequest {
         source: Branch::from_label(&repo.name, &pr.head.label),
         target: Branch::from_label(&repo.name, &pr.base.label),

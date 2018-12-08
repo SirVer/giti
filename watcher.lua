@@ -17,7 +17,7 @@ return {
       -- },
       {
         name = "Cargo build [debug]",
-        command = "cargo build --debug --color=always",
+        command = "cargo build --color=always",
       },
       -- {
         -- name = "Cargo build [release]",
