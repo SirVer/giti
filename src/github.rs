@@ -8,7 +8,6 @@ use hyper_tls;
 use std::env;
 use tokio::await;
 use tokio::prelude::*;
-use tokio_async_await::compat::forward::IntoAwaitable;
 use tokio_async_await::compat::backward::Compat;
 use url;
 
@@ -68,13 +67,11 @@ async fn fetch_pr(
     repo: Repo,
     number: u64,
 ) -> hubcaps::Result<(Repo, hubcaps::pulls::Pull)> {
-    let res = await!(
-        github
-            .repo(repo.owner.to_string(), repo.name.to_string())
-            .pulls()
-            .get(number)
-            .get()
-    )?;
+    let res = await!(github
+        .repo(repo.owner.to_string(), repo.name.to_string())
+        .pulls()
+        .get(number)
+        .get())?;
     Ok((repo, res))
 }
 
@@ -105,7 +102,6 @@ async fn find_login_name(github: Github) -> hubcaps::Result<String> {
     Ok(await!(github.users().authenticated())?.login)
 }
 
-
 async fn run(github: Github) -> hubcaps::Result<Vec<(Repo, hubcaps::pulls::Pull)>> {
     let login = await!(find_login_name(github.clone()))?;
     let res = await!(find_assigned_pr_info(github.clone(), login))?;
@@ -118,27 +114,29 @@ pub fn find_assigned_prs(repo: Option<&Repo>) -> Result<Vec<PullRequest>> {
     let repo = repo.map(|r| r.clone());
     let (tx, rx) = ::std::sync::mpsc::channel();
     let tx = ::std::sync::Mutex::new(tx);
-    tokio::run_async(async move {
-        let github = Github::new(
-            "SirVer_giti/unspecified",
-            Some(Credentials::Token(token)));
-        let mut prs = await!(run(github.clone())).expect("run() did not succeed.");
-        prs.sort_by_key(|(_, pr)| pr.number);
+    tokio::run_async(
+        async move {
+            let github = Github::new("SirVer_giti/unspecified", Some(Credentials::Token(token)));
+            let mut prs = await!(run(github.clone())).expect("run() did not succeed.");
+            prs.sort_by_key(|(_, pr)| pr.number);
 
-        let new_result = prs
-            .iter()
-            .filter(|(pr_repo, _)| match repo {
-                None => true,
-                Some(ref r) => pr_repo == r,
-            }).map(|(pr_repo, pr)| PullRequest {
-                source: Branch::from_label(&pr_repo.name, &pr.head.label),
-                target: Branch::from_label(&pr_repo.name, &pr.base.label),
-                number: pr.number as i32,
-                author_login: pr.user.login.clone(),
-                title: pr.title.clone(),
-            }).collect::<Vec<_>>();
-        tx.lock().unwrap().send(new_result).unwrap();
-    });
+            let new_result = prs
+                .iter()
+                .filter(|(pr_repo, _)| match repo {
+                    None => true,
+                    Some(ref r) => pr_repo == r,
+                })
+                .map(|(pr_repo, pr)| PullRequest {
+                    source: Branch::from_label(&pr_repo.name, &pr.head.label),
+                    target: Branch::from_label(&pr_repo.name, &pr.base.label),
+                    number: pr.number as i32,
+                    author_login: pr.user.login.clone(),
+                    title: pr.title.clone(),
+                })
+                .collect::<Vec<_>>();
+            tx.lock().unwrap().send(new_result).unwrap();
+        },
+    );
 
     Ok(rx.recv().unwrap())
 }
@@ -149,13 +147,14 @@ pub fn get_pr(repo: &Repo, pr_id: i32) -> Result<PullRequest> {
     let (tx, rx) = ::std::sync::mpsc::channel();
     let tx = ::std::sync::Mutex::new(tx);
     let repo_clone = repo.clone();
-    tokio::run_async(async move {
-        let github = Github::new(
-            "SirVer_giti/unspecified",
-            Some(Credentials::Token(token)));
-        let (_, pr) = await!(fetch_pr(github, repo_clone, pr_id as u64)).expect("fetch_pr did not complete.");
-        tx.lock().unwrap().send(pr).unwrap();
-    });
+    tokio::run_async(
+        async move {
+            let github = Github::new("SirVer_giti/unspecified", Some(Credentials::Token(token)));
+            let (_, pr) = await!(fetch_pr(github, repo_clone, pr_id as u64))
+                .expect("fetch_pr did not complete.");
+            tx.lock().unwrap().send(pr).unwrap();
+        },
+    );
 
     let pr = rx.recv().unwrap();
 
