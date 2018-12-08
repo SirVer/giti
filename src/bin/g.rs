@@ -1,14 +1,10 @@
-extern crate git2;
-extern crate giti;
-#[macro_use]
-extern crate self_update;
-
 use giti::git;
 use giti::ErrorKind;
 use std::env;
 use std::process;
+use self_update::cargo_crate_version;
 
-fn update() -> Result<(), Box<::std::error::Error>> {
+fn update() -> Result<(), Box<dyn (::std::error::Error)>> {
     let target = self_update::get_target()?;
     self_update::backends::github::Update::configure()?
         .repo_owner("SirVer")
