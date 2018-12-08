@@ -1,8 +1,8 @@
 use giti::git;
 use giti::ErrorKind;
+use self_update::cargo_crate_version;
 use std::env;
 use std::process;
-use self_update::cargo_crate_version;
 
 fn update() -> Result<(), Box<dyn (::std::error::Error)>> {
     let target = self_update::get_target()?;
