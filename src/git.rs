@@ -425,6 +425,19 @@ pub fn handle_open_reviews(args: &[&str]) -> Result<()> {
     Ok(())
 }
 
+pub fn handle_start(args: &[&str]) -> Result<()> {
+    if args.len() != 2 {
+        return Err(Error::general(
+            "start requires a branch name.".into(),
+        ));
+    }
+    run_command(&["git", "fetch"])?;
+    run_command(&["git", "branch", "--no-track", args[1], "origin/master"])?;
+    run_command(&["git", "checkout", args[1]])?;
+
+    Ok(())
+}
+
 fn replace_aliases<'a>(command: &'a str, git_aliases: &'a HashMap<String, String>) -> Vec<&'a str> {
     if let Some(value) = git_aliases.get(command) {
         return value.split(' ').collect();
@@ -469,6 +482,7 @@ pub fn handle_repository(original_args: &[&str]) -> Result<()> {
         "merge" => diffbase::handle_merge(&expanded_args, &repo, &mut dbase),
         "pullc" => diffbase::handle_pullc(&expanded_args, &repo, &mut dbase),
         "review" => handle_review(&expanded_args, &repo),
+        "start" => handle_start(&expanded_args),
         "up" => diffbase::handle_up(&expanded_args, &repo, &mut dbase),
 
         _ => dispatch_to("git", &expanded_args),
