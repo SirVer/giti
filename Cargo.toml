@@ -1,18 +1,27 @@
 [package]
 authors = ["Holger Rapp <HolgerRapp@gmx.net>"]
+edition = "2018"
 name = "giti"
 version = "0.4.0"
-edition = "2018"
 
 [dependencies]
+futures = "0.1.25"
+getopts = "0.2.19"
 git2 = "0.7.0"
-self_update = "0.4.2"
-term = "0.5.1"
 hubcaps = "0.5.0"
 hyper = "0.12.17"
 hyper-tls = "0.3.1"
+self_update = "0.4.2"
+serde_json = "1.0.39"
+term = "0.5.1"
+tokio-async-await = "0.1.4"
 url = "1.7.1"
 webbrowser = "0.3.1"
-futures = "0.1.25"
-tokio = { version = "0.1.13", features = ["async-await-preview"] }
-tokio-async-await = "0.1.4"
+
+[dependencies.serde]
+features = ["derive"]
+version = "1.0.91"
+
+[dependencies.tokio]
+features = ["async-await-preview"]
+version = "0.1.13"
