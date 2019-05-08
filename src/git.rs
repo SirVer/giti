@@ -427,9 +427,7 @@ pub fn handle_open_reviews(args: &[&str]) -> Result<()> {
 
 pub fn handle_start(args: &[&str]) -> Result<()> {
     if args.len() != 2 {
-        return Err(Error::general(
-            "start requires a branch name.".into(),
-        ));
+        return Err(Error::general("start requires a branch name.".into()));
     }
     run_command(&["git", "fetch"])?;
     run_command(&["git", "branch", "--no-track", args[1], "origin/master"])?;
