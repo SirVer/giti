@@ -1,3 +1,4 @@
+use crate::diffbase;
 use crate::dispatch::{communicate, dispatch_to, run_command};
 use crate::github;
 use crate::Error;
@@ -7,6 +8,17 @@ use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::str;
 use webbrowser;
+
+/// Calls git merge and checks if the merge was successful.
+pub fn merge(branch: &str, repo: &git2::Repository) -> Result<()> {
+    run_command(&["git", "merge", branch])?;
+    if repo.state() != git2::RepositoryState::Clean {
+        return Err(Error::general(
+            "git merge did not complete cleanly.".to_string(),
+        ));
+    }
+    Ok(())
+}
 
 /// Parses git's configuration and extracts all aliases that do not shell out. Returns (key, value)
 /// representations.
@@ -31,13 +43,29 @@ pub fn get_aliases() -> HashMap<String, String> {
 }
 
 /// Returns the names of all local branches.
-pub fn get_all_local_branches(repo: &git2::Repository) -> Result<HashSet<String>> {
-    let mut b = HashSet::new();
+pub fn get_all_local_branch_names(repo: &git2::Repository) -> Result<HashSet<String>> {
+    Ok(get_all_local_branches(repo)?.keys().cloned().collect())
+}
+
+#[derive(Debug)]
+pub struct BranchInfo {
+    pub remote: Option<String>,
+}
+
+/// Returns some limited information about all local branches.
+pub fn get_all_local_branches(repo: &git2::Repository) -> Result<HashMap<String, BranchInfo>> {
+    let mut results = HashMap::new();
     for entry in repo.branches(Some(git2::BranchType::Local))? {
         let (branch, _) = entry?;
-        b.insert(branch.name()?.unwrap().to_string());
+        let remote = if let Ok(upstream) = branch.upstream() {
+            Some(upstream.name()?.unwrap().to_string())
+        } else {
+            None
+        };
+        let name = branch.name()?.unwrap().to_string();
+        results.insert(name, BranchInfo { remote });
     }
-    Ok(b)
+    Ok(results)
 }
 
 #[derive(Debug)]
@@ -269,7 +297,7 @@ pub fn handle_fix(args: &[&str], repo: &git2::Repository) -> Result<()> {
 
 pub fn handle_cleanup(repo: &git2::Repository) -> Result<()> {
     let current_branch = get_current_branch(repo);
-    for branch in get_all_local_branches(repo)? {
+    for branch in get_all_local_branch_names(repo)? {
         if branch.starts_with('|') && branch != current_branch {
             run_command(&["git", "branch", "-D", &branch])?;
         }
@@ -370,7 +398,7 @@ pub fn handle_review(args: &[&str], repo: &git2::Repository) -> Result<()> {
     let branch_to_fork = format!("remotes/{}/{}", owner, source_branch.name);
     let local_branch = format!("|{}/{}", owner, source_branch.name);
 
-    if get_all_local_branches(repo)?.contains(&local_branch) {
+    if get_all_local_branch_names(repo)?.contains(&local_branch) {
         run_command(&["git", "branch", "-D", &local_branch])?;
     }
 
@@ -397,6 +425,13 @@ pub fn handle_open_reviews(args: &[&str]) -> Result<()> {
     Ok(())
 }
 
+fn replace_aliases<'a>(command: &'a str, git_aliases: &'a HashMap<String, String>) -> Vec<&'a str> {
+    if let Some(value) = git_aliases.get(command) {
+        return value.split(' ').collect();
+    }
+    vec![command]
+}
+
 pub fn handle_repository(original_args: &[&str]) -> Result<()> {
     if original_args.is_empty() {
         return dispatch_to("git", original_args);
@@ -414,13 +449,31 @@ pub fn handle_repository(original_args: &[&str]) -> Result<()> {
         return dispatch_to("git", original_args);
     }
     let repo = repo.unwrap();
+    let mut dbase = diffbase::Diffbase::new(&repo)?;
 
-    match original_args[0] as &str {
+    let git_aliases = get_aliases();
+    let alias_expanded = replace_aliases(original_args[0], &git_aliases);
+    let expanded_args: Vec<&str> = alias_expanded
+        .iter()
+        .chain(original_args[1..].iter())
+        .map(|r| *r)
+        .collect();
+
+    let result = match expanded_args[0] as &str {
         // Intercepted commands.
+        "branch" => diffbase::handle_branch(&expanded_args, &repo, &mut dbase),
+        "checkout" => diffbase::handle_checkout(&expanded_args, &repo, &mut dbase),
         "cleanup" => handle_cleanup(&repo),
-        "fix" => handle_fix(original_args, &repo),
-        "review" => handle_review(original_args, &repo),
+        "down" => diffbase::handle_down(&expanded_args, &repo, &mut dbase),
+        "fix" => handle_fix(&expanded_args, &repo),
+        "merge" => diffbase::handle_merge(&expanded_args, &repo, &mut dbase),
+        "pullc" => diffbase::handle_pullc(&expanded_args, &repo, &mut dbase),
+        "review" => handle_review(&expanded_args, &repo),
+        "up" => diffbase::handle_up(&expanded_args, &repo, &mut dbase),
 
-        _ => dispatch_to("git", original_args),
-    }
+        _ => dispatch_to("git", &expanded_args),
+    };
+
+    dbase.write_to_disk()?;
+    result
 }

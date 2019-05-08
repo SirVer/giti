@@ -6,6 +6,7 @@ use std::result;
 pub enum ErrorKind {
     GeneralError,
     SubcommandFailed,
+    BranchCantBeDiffbase,
 }
 
 #[derive(Debug)]
@@ -28,6 +29,13 @@ impl Error {
         Error {
             description: format!("{} exited with {}", command, code),
             kind: ErrorKind::SubcommandFailed,
+        }
+    }
+
+    pub fn branch_cant_be_diffbase(branch: &str) -> Error {
+        Error {
+            description: format!("{} cannot be a diffbase.", branch),
+            kind: ErrorKind::BranchCantBeDiffbase,
         }
     }
 

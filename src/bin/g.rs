@@ -35,6 +35,7 @@ fn main() {
             match error.kind {
                 ErrorKind::GeneralError => println!("{}", error.description()),
                 ErrorKind::SubcommandFailed => {}
+                ErrorKind::BranchCantBeDiffbase => panic!("This should already be handled."),
             };
             1
         }
