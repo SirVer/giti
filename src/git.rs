@@ -425,11 +425,32 @@ pub fn handle_open_reviews(args: &[&str]) -> Result<()> {
     Ok(())
 }
 
+pub fn handle_clone(args: &[&str]) -> Result<()> {
+    let github_repo_regex =
+        regex::Regex::new(r"^[a-zA-Z\d][a-zA-Z\d-]*/[a-zA-Z\d][a-zA-Z\d-]").unwrap();
+
+    let new_args: Vec<_> = args
+        .iter()
+        .map(|a| {
+            if github_repo_regex.is_match(&a) {
+                format!("git@github.com:{}.git", a)
+            } else {
+                a.to_string()
+            }
+        })
+        .collect();;
+
+    let args_ref: Vec<_> = new_args.iter().map(|s| s as &str).collect();
+    dispatch_to("git", &args_ref)?;
+
+    Ok(())
+}
+
 pub fn handle_start(args: &[&str]) -> Result<()> {
     if args.len() != 2 {
         return Err(Error::general("start requires a branch name.".into()));
     }
-    run_command(&["git", "fetch"])?;
+    let _ = run_command(&["git", "fetch"])?;
     run_command(&["git", "branch", "--no-track", args[1], "origin/master"])?;
     run_command(&["git", "checkout", args[1]])?;
 
@@ -448,20 +469,6 @@ pub fn handle_repository(original_args: &[&str]) -> Result<()> {
         return dispatch_to("git", original_args);
     }
 
-    // Arguments that are valid without a git repository.
-    match original_args[0] as &str {
-        // Intercepted commands.
-        "open_reviews" => return handle_open_reviews(original_args),
-        _ => (),
-    };
-
-    let repo = git2::Repository::discover(".");
-    if repo.is_err() {
-        return dispatch_to("git", original_args);
-    }
-    let repo = repo.unwrap();
-    let mut dbase = diffbase::Diffbase::new(&repo)?;
-
     let git_aliases = get_aliases();
     let alias_expanded = replace_aliases(original_args[0], &git_aliases);
     let expanded_args: Vec<&str> = alias_expanded
@@ -469,6 +476,21 @@ pub fn handle_repository(original_args: &[&str]) -> Result<()> {
         .chain(original_args[1..].iter())
         .map(|r| *r)
         .collect();
+
+    // Arguments that are valid without a git repository.
+    match expanded_args[0] as &str {
+        // Intercepted commands.
+        "open_reviews" => return handle_open_reviews(&expanded_args),
+        "clone" => return handle_clone(&expanded_args),
+        _ => (),
+    };
+
+    let repo = git2::Repository::discover(".");
+    if repo.is_err() {
+        return dispatch_to("git", &expanded_args);
+    }
+    let repo = repo.unwrap();
+    let mut dbase = diffbase::Diffbase::new(&repo)?;
 
     let result = match expanded_args[0] as &str {
         // Intercepted commands.
