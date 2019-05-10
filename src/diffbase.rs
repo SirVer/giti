@@ -199,9 +199,7 @@ pub fn handle_checkout(
     repo: &git2::Repository,
     diffbase: &mut Diffbase,
 ) -> Result<()> {
-    println!("#sirver args: {:#?}", args);
-    let (new_branch_name, _, _) = extract_option(Some("-b"), &args[1..]);
-    println!("#sirver new_branch_name: {:#?}", new_branch_name);
+    let (new_branch_name, ignored, positional) = extract_option(Some("-b"), &args[1..]);
 
     if let Some(new_branch_name) = new_branch_name {
         if let Err(err) = diffbase.set_diffbase(new_branch_name, &git::get_current_branch(repo)) {
@@ -210,7 +208,13 @@ pub fn handle_checkout(
             }
         }
     }
-    dispatch_to("git", args)
+
+    if ignored.is_empty() && positional.len() == 1 {
+        git::checkout(repo, positional[0])?;
+    } else {
+        dispatch_to("git", args)?;
+    }
+    Ok(())
 }
 
 /// Interjects git branch -m to catch on renames.
@@ -247,10 +251,10 @@ pub fn handle_up(args: &[&str], repo: &git2::Repository, diffbase: &Diffbase) ->
     let current_branch = git::get_current_branch(repo);
     if matches.opt_present("root") {
         let root = diffbase.get_root(&current_branch).unwrap();
-        run_command(&["git", "checkout", root])
+        git::checkout(repo, root)
     } else {
         match diffbase.get_parent(&current_branch) {
-            Some(parent) => run_command(&["git", "checkout", parent]),
+            Some(parent) => git::checkout(repo, parent),
             None => Err(Error::general(format!(
                 "{} has no diffbase.",
                 current_branch
@@ -263,7 +267,7 @@ pub fn handle_up(args: &[&str], repo: &git2::Repository, diffbase: &Diffbase) ->
 pub fn handle_down(_: &[&str], repo: &git2::Repository, diffbase: &Diffbase) -> Result<()> {
     let current_branch = git::get_current_branch(repo);
     match diffbase.get_children(&current_branch) {
-        Some(ref children) if children.len() == 1 => run_command(&["git", "checkout", children[0]]),
+        Some(ref children) if children.len() == 1 => git::checkout(repo, children[0]),
         Some(ref children) if children.is_empty() => Err(Error::general(format!(
             "{} has no branches that have it as diffbase.",
             current_branch
@@ -309,7 +313,7 @@ pub fn handle_pullc(args: &[&str], repo: &git2::Repository, diffbase: &Diffbase)
     };
 
     // Sync the root branch.
-    run_command(&["git", "checkout", root])?;
+    git::checkout(repo, root)?;
     if has_remote(root) {
         run_command(&["git", "pull"])?;
     }
@@ -333,7 +337,7 @@ pub fn handle_pullc(args: &[&str], repo: &git2::Repository, diffbase: &Diffbase)
         };
 
         for child in diffbase.get_children(parent).unwrap() {
-            run_command(&["git", "checkout", child])?;
+            git::checkout(repo, child)?;
             if has_remote(child) {
                 run_command(&["git", "pull"])?;
             }
@@ -349,7 +353,7 @@ pub fn handle_pullc(args: &[&str], repo: &git2::Repository, diffbase: &Diffbase)
     merge_parent_into_children(root, diffbase, repo, &local_branches, do_push)?;
 
     if git::get_current_branch(repo) != branch_at_start {
-        dispatch_to("git", &["checkout", &branch_at_start])?;
+        git::checkout(repo, &branch_at_start)?;
     }
     Ok(())
 }
