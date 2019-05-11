@@ -459,7 +459,7 @@ pub fn handle_clone(args: &[&str]) -> Result<()> {
 pub fn handle_pr(args: &[&str], repo: &git2::Repository, dbase: &mut diffbase::Diffbase) -> Result<()> {
     let my_repo = github::Repo {
             owner: "SirVer".to_string(),
-            name: "gitti".to_string(),
+            name: "giti".to_string(),
     };
     github::create_pr(&my_repo)?;
     Ok(())
