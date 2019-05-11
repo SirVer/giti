@@ -516,6 +516,7 @@ pub fn handle_pr(
     // Base to merge from. If it is in the same fork as base, it must not contain the owners name.
     println!("#sirver ALIVE {}:{}", file!(), line!());
     println!("#sirver head_remote: {:#?},base_remote: {:#?}", head_remote, base_remote);
+    println!("#sirver remotes: {:#?}", remotes);
     let head = if head_remote == base_remote {
     println!("#sirver ALIVE {}:{}", file!(), line!());
         current_branch
