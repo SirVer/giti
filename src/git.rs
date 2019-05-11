@@ -460,7 +460,7 @@ pub fn handle_clone(args: &[&str]) -> Result<()> {
 }
 
 pub fn handle_pr(
-    args: &[&str],
+    _args: &[&str],
     repo: &git2::Repository,
     _: &mut diffbase::Diffbase,
 ) -> Result<()> {
@@ -543,8 +543,8 @@ pub fn handle_pr(
     println!("#sirver pr: {:#?}", pr);
 
     let _ = webbrowser::open(&format!(
-        "{}{}/{}/{}",
-        args[1], pr.target.repo.owner, pr.target.repo.name, pr.number
+        "https://github.com/{}/{}/{}",
+        pr.target.repo.owner, pr.target.repo.name, pr.number
     ));
 
     Ok(())
