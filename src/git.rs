@@ -481,10 +481,11 @@ pub fn handle_pr(
 
     let mut file = tempfile::Builder::new()
         .prefix("COMMIT_EDITMSG")
+        .rand_bytes(0)
         .tempfile()?;
     run_editor(&file.path());
 
-    let content = ::std::fs::read(&file.path())?;
+    let content = ::std::fs::read_to_string(&file.path())?;
     println!("#sirver content: {:#?}", content);
 
     unimplemented!();
