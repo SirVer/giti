@@ -543,7 +543,7 @@ pub fn handle_pr(
     println!("#sirver pr: {:#?}", pr);
 
     let _ = webbrowser::open(&format!(
-        "https://github.com/{}/{}/{}",
+        "https://github.com/{}/{}/pull/{}",
         pr.target.repo.owner, pr.target.repo.name, pr.number
     ));
 
