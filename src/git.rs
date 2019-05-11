@@ -1,5 +1,5 @@
 use crate::diffbase;
-use crate::dispatch::{communicate, dispatch_to, run_command};
+use crate::dispatch::{communicate, dispatch_to, run_command, run_editor};
 use crate::github;
 use crate::Error;
 use crate::Result;
@@ -408,10 +408,8 @@ pub fn handle_review(args: &[&str], repo: &git2::Repository) -> Result<()> {
     Ok(())
 }
 
-pub fn checkout(
-    repo: &git2::Repository,
-    branch: &str) -> Result<()> {
-        run_command(&["git", "checkout", branch])?;
+pub fn checkout(repo: &git2::Repository, branch: &str) -> Result<()> {
+    run_command(&["git", "checkout", branch])?;
     if !repo.submodules().unwrap().is_empty() {
         run_command(&["git", "submodule", "update", "--init", "--recursive"])?;
     }
@@ -457,7 +455,11 @@ pub fn handle_clone(args: &[&str]) -> Result<()> {
     Ok(())
 }
 
-pub fn handle_pr(args: &[&str], repo: &git2::Repository, dbase: &mut diffbase::Diffbase) -> Result<()> {
+pub fn handle_pr(
+    args: &[&str],
+    repo: &git2::Repository,
+    dbase: &mut diffbase::Diffbase,
+) -> Result<()> {
     let remotes = get_remotes()?;
 
     let master_origin = get_origin("master").unwrap();
@@ -468,23 +470,32 @@ pub fn handle_pr(args: &[&str], repo: &git2::Repository, dbase: &mut diffbase::D
     let current_branch = get_current_branch(&repo);
     if local_branches[&current_branch].remote.is_none() {
         return Err(Error::general(
-            "current branch has no remote. Cannot open a pull request.".into(),
+            "current branch has no remote (maybe git push -u?). \
+             Cannot open a pull request."
+                .into(),
         ));
     }
 
+    // NOCOM(#sirver): check if diffbase already has a PR associated with this.
     expect_working_directory_clean()?;
 
+    let mut file = tempfile::Builder::new()
+        .prefix("COMMIT_EDITMSG")
+        .tempfile()?;
+    run_editor(&file.path());
 
+    let content = ::std::fs::read(&file.path())?;
+    println!("#sirver content: {:#?}", content);
+
+    unimplemented!();
 
     let my_repo = github::Repo {
-            owner: "SirVer".to_string(),
-            name: "giti".to_string(),
+        owner: "SirVer".to_string(),
+        name: "giti".to_string(),
     };
     github::create_pr(&my_repo)?;
     Ok(())
-
 }
-
 
 pub fn handle_start(args: &[&str], repo: &git2::Repository) -> Result<()> {
     if args.len() != 2 {
