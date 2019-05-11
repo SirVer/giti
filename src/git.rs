@@ -63,6 +63,7 @@ pub fn get_all_local_branches(repo: &git2::Repository) -> Result<HashMap<String,
             None
         };
         let name = branch.name()?.unwrap().to_string();
+        println!("#sirver name: {:#?},remote: {:#?}", name, remote);
         results.insert(name, BranchInfo { remote });
     }
     Ok(results)
