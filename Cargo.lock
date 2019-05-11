@@ -293,7 +293,7 @@ dependencies = [
 
 [[package]]
 name = "giti"
-version = "0.5.2"
+version = "0.5.4"
 dependencies = [
  "default-editor 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "futures 0.1.25 (registry+https://github.com/rust-lang/crates.io-index)",
