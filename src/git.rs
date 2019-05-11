@@ -68,7 +68,7 @@ pub fn get_all_local_branches(repo: &git2::Repository) -> Result<HashMap<String,
     Ok(results)
 }
 
-#[derive(Debug)]
+#[derive(Debug,PartialEq,Eq)]
 struct Remote {
     url: String,
 }
@@ -466,8 +466,8 @@ pub fn handle_pr(
     let remotes = get_remotes()?;
 
     let master_origin = get_origin("master").unwrap();
-    let master_remote = &remotes[&master_origin.remote];
-    let github_repo = master_remote.repository();
+    let base_remote = &remotes[&master_origin.remote];
+    let github_repo = base_remote.repository();
 
     println!("#sirver ALIVE {}:{}", file!(), line!());
     let local_branches = get_all_local_branches(&repo)?;
@@ -480,7 +480,7 @@ pub fn handle_pr(
         ));
     }
     println!("#sirver ALIVE {}:{}", file!(), line!());
-    let head_remote = local_branches[&current_branch].remote.clone().unwrap();
+    let head_remote = &remotes[&local_branches[&current_branch].remote.clone().unwrap()];
 
     // NOCOM(#sirver): check if diffbase already has a PR associated with this.
     expect_working_directory_clean()?;
@@ -509,7 +509,6 @@ pub fn handle_pr(
 
     println!("#sirver ALIVE {}:{}", file!(), line!());
     // Target to merge into.
-    let base_remote = "origin".to_string();
     let base = "master".to_string();
 
     println!("#sirver ALIVE {}:{}", file!(), line!());
@@ -522,7 +521,6 @@ pub fn handle_pr(
         current_branch
     } else {
     println!("#sirver ALIVE {}:{}", file!(), line!());
-        let head_remote = &remotes[&head_remote];
         format!("{}/{}", head_remote.owner(), current_branch)
     };
 
