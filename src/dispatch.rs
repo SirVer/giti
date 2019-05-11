@@ -1,6 +1,7 @@
 /// Tools to shell out to external commands.
 use super::error::{Error, Result};
 use std::process;
+use std::path::Path;
 
 use term;
 
@@ -8,6 +9,16 @@ use term;
 enum PrintCommands {
     YES,
     NO,
+}
+
+pub fn run_editor(path: &Path) -> Result<()> {
+    let editor = default_editor::get()?;
+    let mut it = editor.split(" ");
+    let cmd = it.next().unwrap();
+    let mut args: Vec<String> = it.map(|s| s.to_string()).collect();
+    args.push(path.to_str().unwrap().to_string());
+    let _ = process::Command::new(cmd).args(&args).spawn()?.wait();
+    Ok(())
 }
 
 /// Dispatches to 'command' without echoing.

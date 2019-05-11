@@ -141,6 +141,32 @@ pub fn find_assigned_prs(repo: Option<&Repo>) -> Result<Vec<PullRequest>> {
     Ok(rx.recv().unwrap())
 }
 
+pub fn create_pr(repo: &Repo, pull_options: hubcaps::pulls::PullOptions) -> Result<PullRequest> {
+    let token = env::var("GITHUB_TOKEN")?;
+
+    let repo_clone = repo.clone();
+    let (tx, rx) = ::std::sync::mpsc::channel();
+    let tx = ::std::sync::Mutex::new(tx);
+    tokio::run_async(
+        async move {
+            let github = Github::new("SirVer_giti/unspecified", Some(Credentials::Token(token)));
+            let result = await!(github
+                                .repo(repo_clone.owner.to_string(), repo_clone.name.to_string())
+                                .pulls().create(&pull_options));
+            tx.lock().unwrap().send(result).unwrap();
+        });
+
+    let pr = rx.recv().unwrap()?;
+
+    Ok(PullRequest {
+        source: Branch::from_label(&repo.name, &pr.head.label),
+        target: Branch::from_label(&repo.name, &pr.base.label),
+        number: pr.number as i32,
+        author_login: pr.user.login.clone(),
+        title: pr.title.clone(),
+    })
+}
+
 pub fn get_pr(repo: &Repo, pr_id: i32) -> Result<PullRequest> {
     let token = env::var("GITHUB_TOKEN")?;
 
