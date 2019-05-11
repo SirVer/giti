@@ -151,8 +151,8 @@ pub fn create_pr(repo: &Repo) -> Result<()> {
 
     let pull_options = hubcaps::pulls::PullOptions {
         title: "My assume PR".to_string(),
-        head: "master".to_string(),
-        base: "open_prs".to_string(),
+        base: "master".to_string(),
+        head: "open_prs".to_string(),
         body: Some(" Lorem ipsum dolor sit amet, consectetur adipisicing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.".to_string()),
     };
     let foo = await!(github

@@ -457,6 +457,24 @@ pub fn handle_clone(args: &[&str]) -> Result<()> {
 }
 
 pub fn handle_pr(args: &[&str], repo: &git2::Repository, dbase: &mut diffbase::Diffbase) -> Result<()> {
+    let remotes = get_remotes()?;
+
+    let master_origin = get_origin("master").unwrap();
+    let master_remote = &remotes[&master_origin.remote];
+    let github_repo = master_remote.repository();
+
+    let local_branches = get_all_local_branches(&repo)?;
+    let current_branch = get_current_branch(&repo);
+    if local_branches[&current_branch].remote.is_none() {
+        return Err(Error::general(
+            "current branch has no remote. Cannot open a pull request.".into(),
+        ));
+    }
+
+    expect_working_directory_clean()?;
+
+
+
     let my_repo = github::Repo {
             owner: "SirVer".to_string(),
             name: "giti".to_string(),
