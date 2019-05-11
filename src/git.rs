@@ -63,7 +63,6 @@ pub fn get_all_local_branches(repo: &git2::Repository) -> Result<HashMap<String,
             None
         };
         let name = branch.name()?.unwrap().to_string();
-        println!("#sirver name: {:#?},remote: {:#?}", name, remote);
         results.insert(name, BranchInfo { remote });
     }
     Ok(results)
@@ -81,15 +80,19 @@ impl Remote {
         self.url.rsplitn(2, '/').nth(0).unwrap()
     }
 
+    pub fn owner(&self) -> &str {
+        let owner_and_project = self.url.rsplitn(2, ':').nth(0).unwrap();
+        owner_and_project.rsplitn(2, '/').nth(1).unwrap()
+    }
+
     pub fn repository(&self) -> github::Repo {
         let owner_and_project = self.url.rsplitn(2, ':').nth(0).unwrap();
-        let owner = owner_and_project.rsplitn(2, '/').nth(1).unwrap();
         let mut name = owner_and_project.rsplitn(2, '/').nth(0).unwrap();
         if name.ends_with(".git") {
             name = &name[..name.len() - 4];
         }
         github::Repo {
-            owner: owner.to_string(),
+            owner: self.owner().to_string(),
             name: name.to_string(),
         }
     }
@@ -458,7 +461,7 @@ pub fn handle_clone(args: &[&str]) -> Result<()> {
 pub fn handle_pr(
     args: &[&str],
     repo: &git2::Repository,
-    dbase: &mut diffbase::Diffbase,
+    _: &mut diffbase::Diffbase,
 ) -> Result<()> {
     let remotes = get_remotes()?;
 
@@ -475,26 +478,60 @@ pub fn handle_pr(
                 .into(),
         ));
     }
+    let head_remote = local_branches[&current_branch].remote.clone().unwrap();
 
     // NOCOM(#sirver): check if diffbase already has a PR associated with this.
     expect_working_directory_clean()?;
 
-    let mut file = tempfile::Builder::new()
+    let file = tempfile::Builder::new()
         .prefix("COMMIT_EDITMSG")
         .rand_bytes(0)
         .tempfile()?;
-    run_editor(&file.path());
+    run_editor(&file.path())?;
 
-    let content = ::std::fs::read_to_string(&file.path())?;
-    println!("#sirver content: {:#?}", content);
-
-    unimplemented!();
-
-    let my_repo = github::Repo {
-        owner: "SirVer".to_string(),
-        name: "giti".to_string(),
+    let content = ::std::fs::read_to_string(&file.path())?.trim().to_string();
+    let lines: Vec<String> = content.lines().map(|l| l.trim().to_string()).collect();
+    if lines.is_empty() {
+        return Err(Error::general("No message, no PR.".into()));
+    }
+    let title = lines[0].to_string();
+    let body = if lines.len() > 2 {
+        Some(lines[2..].join("\n"))
+    } else {
+        None
     };
-    github::create_pr(&my_repo)?;
+
+    // Target to merge into.
+    let base_remote = "origin".to_string();
+    let base = "master".to_string();
+
+    // Base to merge from. If it is in the same fork as base, it must not contain the owners name.
+    let head = if head_remote == base_remote {
+        current_branch
+    } else {
+        let head_remote = &remotes[&head_remote];
+        format!("{}/{}", head_remote.owner(), current_branch)
+    };
+
+    let pull_options = hubcaps::pulls::PullOptions {
+        title,
+        body,
+        head,
+        base,
+    };
+
+    println!("#sirver pull_options: {:#?}", pull_options);
+
+    let pr = github::create_pr(&github_repo, pull_options)?;
+    println!("Opened #{}. Opening in web browser.", pr.number);
+
+    println!("#sirver pr: {:#?}", pr);
+
+    let _ = webbrowser::open(&format!(
+        "{}{}/{}/{}",
+        args[1], pr.target.repo.owner, pr.target.repo.name, pr.number
+    ));
+
     Ok(())
 }
 

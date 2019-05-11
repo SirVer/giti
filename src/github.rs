@@ -141,27 +141,30 @@ pub fn find_assigned_prs(repo: Option<&Repo>) -> Result<Vec<PullRequest>> {
     Ok(rx.recv().unwrap())
 }
 
-pub fn create_pr(repo: &Repo) -> Result<()> {
+pub fn create_pr(repo: &Repo, pull_options: hubcaps::pulls::PullOptions) -> Result<PullRequest> {
     let token = env::var("GITHUB_TOKEN")?;
 
     let repo_clone = repo.clone();
+    let (tx, rx) = ::std::sync::mpsc::channel();
+    let tx = ::std::sync::Mutex::new(tx);
     tokio::run_async(
         async move {
             let github = Github::new("SirVer_giti/unspecified", Some(Credentials::Token(token)));
-
-    let pull_options = hubcaps::pulls::PullOptions {
-        title: "My assume PR".to_string(),
-        base: "master".to_string(),
-        head: "open_prs".to_string(),
-        body: Some(" Lorem ipsum dolor sit amet, consectetur adipisicing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.".to_string()),
-    };
-    let foo = await!(github
-        .repo(repo_clone.owner.to_string(), repo_clone.name.to_string())
-        .pulls().create(&pull_options));
-        println!("#sirver foo: {:#?}", foo);
+            let result = await!(github
+                                .repo(repo_clone.owner.to_string(), repo_clone.name.to_string())
+                                .pulls().create(&pull_options));
+            tx.lock().unwrap().send(result).unwrap();
         });
-    Ok(())
 
+    let pr = rx.recv().unwrap()?;
+
+    Ok(PullRequest {
+        source: Branch::from_label(&repo.name, &pr.head.label),
+        target: Branch::from_label(&repo.name, &pr.base.label),
+        number: pr.number as i32,
+        author_login: pr.user.login.clone(),
+        title: pr.title.clone(),
+    })
 }
 
 pub fn get_pr(repo: &Repo, pr_id: i32) -> Result<PullRequest> {
@@ -180,7 +183,6 @@ pub fn get_pr(repo: &Repo, pr_id: i32) -> Result<PullRequest> {
     );
 
     let pr = rx.recv().unwrap();
-    println!("#sirver pr: {:#?}", pr);
 
     Ok(PullRequest {
         source: Branch::from_label(&repo.name, &pr.head.label),
