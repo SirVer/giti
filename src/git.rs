@@ -469,6 +469,7 @@ pub fn handle_pr(
     let master_remote = &remotes[&master_origin.remote];
     let github_repo = master_remote.repository();
 
+    println!("#sirver ALIVE {}:{}", file!(), line!());
     let local_branches = get_all_local_branches(&repo)?;
     let current_branch = get_current_branch(&repo);
     if local_branches[&current_branch].remote.is_none() {
@@ -478,22 +479,27 @@ pub fn handle_pr(
                 .into(),
         ));
     }
+    println!("#sirver ALIVE {}:{}", file!(), line!());
     let head_remote = local_branches[&current_branch].remote.clone().unwrap();
 
     // NOCOM(#sirver): check if diffbase already has a PR associated with this.
     expect_working_directory_clean()?;
 
+    println!("#sirver ALIVE {}:{}", file!(), line!());
     let file = tempfile::Builder::new()
         .prefix("COMMIT_EDITMSG")
         .rand_bytes(0)
         .tempfile()?;
     run_editor(&file.path())?;
 
+    println!("#sirver ALIVE {}:{}", file!(), line!());
     let content = ::std::fs::read_to_string(&file.path())?.trim().to_string();
     let lines: Vec<String> = content.lines().map(|l| l.trim().to_string()).collect();
+    println!("#sirver ALIVE {}:{}", file!(), line!());
     if lines.is_empty() {
         return Err(Error::general("No message, no PR.".into()));
     }
+    println!("#sirver ALIVE {}:{}", file!(), line!());
     let title = lines[0].to_string();
     let body = if lines.len() > 2 {
         Some(lines[2..].join("\n"))
@@ -501,18 +507,24 @@ pub fn handle_pr(
         None
     };
 
+    println!("#sirver ALIVE {}:{}", file!(), line!());
     // Target to merge into.
     let base_remote = "origin".to_string();
     let base = "master".to_string();
 
+    println!("#sirver ALIVE {}:{}", file!(), line!());
     // Base to merge from. If it is in the same fork as base, it must not contain the owners name.
+    println!("#sirver ALIVE {}:{}", file!(), line!());
     let head = if head_remote == base_remote {
+    println!("#sirver ALIVE {}:{}", file!(), line!());
         current_branch
     } else {
+    println!("#sirver ALIVE {}:{}", file!(), line!());
         let head_remote = &remotes[&head_remote];
         format!("{}/{}", head_remote.owner(), current_branch)
     };
 
+    println!("#sirver ALIVE {}:{}", file!(), line!());
     let pull_options = hubcaps::pulls::PullOptions {
         title,
         body,
@@ -520,6 +532,7 @@ pub fn handle_pr(
         base,
     };
 
+    println!("#sirver ALIVE {}:{}", file!(), line!());
     println!("#sirver pull_options: {:#?}", pull_options);
 
     let pr = github::create_pr(&github_repo, pull_options)?;
