@@ -287,7 +287,7 @@ pub fn handle_pullc(args: &[&str], repo: &git2::Repository, diffbase: &Diffbase)
     opts.optflag(
         "p",
         "push",
-        "Also push all branches that have a remote and are changed.",
+        "Also push all branches that have a upstream and are changed.",
     );
     let matches = match opts.parse(&args[1..]) {
         Ok(m) => m,
@@ -305,20 +305,20 @@ pub fn handle_pullc(args: &[&str], repo: &git2::Repository, diffbase: &Diffbase)
     // Merge master into the root.
     run_command(&["git", "fetch"])?;
 
-    let has_remote = |s| {
+    let has_upstream = |s| {
         if let Some(b) = local_branches.get(s) {
-            return b.remote.is_some();
+            return b.upstream.is_some();
         }
         false
     };
 
     // Sync the root branch.
     git::checkout(repo, root)?;
-    if has_remote(root) {
+    if has_upstream(root) {
         run_command(&["git", "pull"])?;
     }
     git::merge("origin/master", repo)?;
-    if do_push && has_remote(root) {
+    if do_push && has_upstream(root) {
         run_command(&["git", "push"])?;
     }
 
@@ -329,20 +329,20 @@ pub fn handle_pullc(args: &[&str], repo: &git2::Repository, diffbase: &Diffbase)
         local_branches: &HashMap<String, git::BranchInfo>,
         do_push: bool,
     ) -> Result<()> {
-        let has_remote = |s| {
+        let has_upstream = |s| {
             if let Some(b) = local_branches.get(s) {
-                return b.remote.is_some();
+                return b.upstream.is_some();
             }
             false
         };
 
         for child in diffbase.get_children(parent).unwrap() {
             git::checkout(repo, child)?;
-            if has_remote(child) {
+            if has_upstream(child) {
                 run_command(&["git", "pull"])?;
             }
             git::merge(parent, repo)?;
-            if do_push && has_remote(child) {
+            if do_push && has_upstream(child) {
                 run_command(&["git", "push"])?;
             }
             merge_parent_into_children(child, diffbase, repo, local_branches, do_push)?;

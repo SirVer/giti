@@ -49,7 +49,7 @@ pub fn get_all_local_branch_names(repo: &git2::Repository) -> Result<HashSet<Str
 
 #[derive(Debug)]
 pub struct BranchInfo {
-    pub remote: Option<String>,
+    pub upstream: Option<String>,
 }
 
 /// Returns some limited information about all local branches.
@@ -57,18 +57,19 @@ pub fn get_all_local_branches(repo: &git2::Repository) -> Result<HashMap<String,
     let mut results = HashMap::new();
     for entry in repo.branches(Some(git2::BranchType::Local))? {
         let (branch, _) = entry?;
-        let remote = if let Ok(upstream) = branch.upstream() {
+        let upstream = if let Ok(upstream) = branch.upstream() {
             Some(upstream.name()?.unwrap().to_string())
         } else {
             None
         };
         let name = branch.name()?.unwrap().to_string();
-        results.insert(name, BranchInfo { remote });
+        results.insert(name, BranchInfo { upstream });
     }
     Ok(results)
 }
 
 #[derive(Debug,PartialEq,Eq)]
+/// Could be git@github.com:SirVer/giti.git.
 struct Remote {
     url: String,
 }
@@ -472,15 +473,16 @@ pub fn handle_pr(
     println!("#sirver ALIVE {}:{}", file!(), line!());
     let local_branches = get_all_local_branches(&repo)?;
     let current_branch = get_current_branch(&repo);
-    if local_branches[&current_branch].remote.is_none() {
+    if local_branches[&current_branch].upstream.is_none() {
         return Err(Error::general(
-            "current branch has no remote (maybe git push -u?). \
+            "current branch has no upstream (maybe git push -u?). \
              Cannot open a pull request."
                 .into(),
         ));
     }
-    println!("#sirver ALIVE {}:{}", file!(), line!());
-    let head_remote = &remotes[&local_branches[&current_branch].remote.clone().unwrap()];
+    // Could be "SirVer/foobar" or "origin/foobar"
+    let head_upstream = &local_branches[&current_branch].upstream.clone().unwrap();
+    let head_remote = &remotes[head_upstream.split('/').next().unwrap()];
 
     // NOCOM(#sirver): check if diffbase already has a PR associated with this.
     expect_working_directory_clean()?;
