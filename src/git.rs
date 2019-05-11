@@ -1,5 +1,5 @@
 use crate::diffbase;
-use crate::dispatch::{communicate, dispatch_to, run_command};
+use crate::dispatch::{communicate, dispatch_to, run_command, run_editor};
 use crate::github;
 use crate::Error;
 use crate::Result;
@@ -49,7 +49,7 @@ pub fn get_all_local_branch_names(repo: &git2::Repository) -> Result<HashSet<Str
 
 #[derive(Debug)]
 pub struct BranchInfo {
-    pub remote: Option<String>,
+    pub upstream: Option<String>,
 }
 
 /// Returns some limited information about all local branches.
@@ -57,18 +57,19 @@ pub fn get_all_local_branches(repo: &git2::Repository) -> Result<HashMap<String,
     let mut results = HashMap::new();
     for entry in repo.branches(Some(git2::BranchType::Local))? {
         let (branch, _) = entry?;
-        let remote = if let Ok(upstream) = branch.upstream() {
+        let upstream = if let Ok(upstream) = branch.upstream() {
             Some(upstream.name()?.unwrap().to_string())
         } else {
             None
         };
         let name = branch.name()?.unwrap().to_string();
-        results.insert(name, BranchInfo { remote });
+        results.insert(name, BranchInfo { upstream });
     }
     Ok(results)
 }
 
-#[derive(Debug)]
+#[derive(Debug,PartialEq,Eq)]
+/// Could be git@github.com:SirVer/giti.git.
 struct Remote {
     url: String,
 }
@@ -80,15 +81,19 @@ impl Remote {
         self.url.rsplitn(2, '/').nth(0).unwrap()
     }
 
+    pub fn owner(&self) -> &str {
+        let owner_and_project = self.url.rsplitn(2, ':').nth(0).unwrap();
+        owner_and_project.rsplitn(2, '/').nth(1).unwrap()
+    }
+
     pub fn repository(&self) -> github::Repo {
         let owner_and_project = self.url.rsplitn(2, ':').nth(0).unwrap();
-        let owner = owner_and_project.rsplitn(2, '/').nth(1).unwrap();
         let mut name = owner_and_project.rsplitn(2, '/').nth(0).unwrap();
         if name.ends_with(".git") {
             name = &name[..name.len() - 4];
         }
         github::Repo {
-            owner: owner.to_string(),
+            owner: self.owner().to_string(),
             name: name.to_string(),
         }
     }
@@ -407,10 +412,8 @@ pub fn handle_review(args: &[&str], repo: &git2::Repository) -> Result<()> {
     Ok(())
 }
 
-pub fn checkout(
-    repo: &git2::Repository,
-    branch: &str) -> Result<()> {
-        run_command(&["git", "checkout", branch])?;
+pub fn checkout(repo: &git2::Repository, branch: &str) -> Result<()> {
+    run_command(&["git", "checkout", branch])?;
     if !repo.submodules().unwrap().is_empty() {
         run_command(&["git", "submodule", "update", "--init", "--recursive"])?;
     }
@@ -452,6 +455,97 @@ pub fn handle_clone(args: &[&str]) -> Result<()> {
 
     let args_ref: Vec<_> = new_args.iter().map(|s| s as &str).collect();
     dispatch_to("git", &args_ref)?;
+
+    Ok(())
+}
+
+pub fn handle_pr(
+    _args: &[&str],
+    repo: &git2::Repository,
+    _: &mut diffbase::Diffbase,
+) -> Result<()> {
+    let remotes = get_remotes()?;
+
+    let master_origin = get_origin("master").unwrap();
+    let base_remote = &remotes[&master_origin.remote];
+    let github_repo = base_remote.repository();
+
+    println!("#sirver ALIVE {}:{}", file!(), line!());
+    let local_branches = get_all_local_branches(&repo)?;
+    let current_branch = get_current_branch(&repo);
+    if local_branches[&current_branch].upstream.is_none() {
+        return Err(Error::general(
+            "current branch has no upstream (maybe git push -u?). \
+             Cannot open a pull request."
+                .into(),
+        ));
+    }
+    // Could be "SirVer/foobar" or "origin/foobar"
+    let head_upstream = &local_branches[&current_branch].upstream.clone().unwrap();
+    let head_remote = &remotes[head_upstream.split('/').next().unwrap()];
+
+    // NOCOM(#sirver): check if diffbase already has a PR associated with this.
+    expect_working_directory_clean()?;
+
+    println!("#sirver ALIVE {}:{}", file!(), line!());
+    let file = tempfile::Builder::new()
+        .prefix("COMMIT_EDITMSG")
+        .rand_bytes(0)
+        .tempfile()?;
+    run_editor(&file.path())?;
+
+    println!("#sirver ALIVE {}:{}", file!(), line!());
+    let content = ::std::fs::read_to_string(&file.path())?.trim().to_string();
+    let lines: Vec<String> = content.lines().map(|l| l.trim().to_string()).collect();
+    println!("#sirver ALIVE {}:{}", file!(), line!());
+    if lines.is_empty() {
+        return Err(Error::general("No message, no PR.".into()));
+    }
+    println!("#sirver ALIVE {}:{}", file!(), line!());
+    let title = lines[0].to_string();
+    let body = if lines.len() > 2 {
+        Some(lines[2..].join("\n"))
+    } else {
+        None
+    };
+
+    println!("#sirver ALIVE {}:{}", file!(), line!());
+    // Target to merge into.
+    let base = "master".to_string();
+
+    println!("#sirver ALIVE {}:{}", file!(), line!());
+    // Base to merge from. If it is in the same fork as base, it must not contain the owners name.
+    println!("#sirver ALIVE {}:{}", file!(), line!());
+    println!("#sirver head_remote: {:#?},base_remote: {:#?}", head_remote, base_remote);
+    println!("#sirver remotes: {:#?}", remotes);
+    let head = if head_remote == base_remote {
+    println!("#sirver ALIVE {}:{}", file!(), line!());
+        current_branch
+    } else {
+    println!("#sirver ALIVE {}:{}", file!(), line!());
+        format!("{}/{}", head_remote.owner(), current_branch)
+    };
+
+    println!("#sirver ALIVE {}:{}", file!(), line!());
+    let pull_options = hubcaps::pulls::PullOptions {
+        title,
+        body,
+        head,
+        base,
+    };
+
+    println!("#sirver ALIVE {}:{}", file!(), line!());
+    println!("#sirver pull_options: {:#?}", pull_options);
+
+    let pr = github::create_pr(&github_repo, pull_options)?;
+    println!("Opened #{}. Opening in web browser.", pr.number);
+
+    println!("#sirver pr: {:#?}", pr);
+
+    let _ = webbrowser::open(&format!(
+        "https://github.com/{}/{}/pull/{}",
+        pr.target.repo.owner, pr.target.repo.name, pr.number
+    ));
 
     Ok(())
 }
@@ -512,6 +606,7 @@ pub fn handle_repository(original_args: &[&str]) -> Result<()> {
         "review" => handle_review(&expanded_args, &repo),
         "start" => handle_start(&expanded_args, &repo),
         "up" => diffbase::handle_up(&expanded_args, &repo, &mut dbase),
+        "pr" => handle_pr(&expanded_args, &repo, &mut dbase),
 
         _ => dispatch_to("git", &expanded_args),
     };
