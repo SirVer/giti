@@ -456,6 +456,17 @@ pub fn handle_clone(args: &[&str]) -> Result<()> {
     Ok(())
 }
 
+pub fn handle_pr(args: &[&str], repo: &git2::Repository, dbase: &mut diffbase::Diffbase) -> Result<()> {
+    let my_repo = github::Repo {
+            owner: "SirVer".to_string(),
+            name: "gitti".to_string(),
+    };
+    github::create_pr(&my_repo)?;
+    Ok(())
+
+}
+
+
 pub fn handle_start(args: &[&str], repo: &git2::Repository) -> Result<()> {
     if args.len() != 2 {
         return Err(Error::general("start requires a branch name.".into()));
@@ -512,6 +523,7 @@ pub fn handle_repository(original_args: &[&str]) -> Result<()> {
         "review" => handle_review(&expanded_args, &repo),
         "start" => handle_start(&expanded_args, &repo),
         "up" => diffbase::handle_up(&expanded_args, &repo, &mut dbase),
+        "pr" => handle_pr(&expanded_args, &repo, &mut dbase),
 
         _ => dispatch_to("git", &expanded_args),
     };
