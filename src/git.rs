@@ -363,10 +363,7 @@ pub fn handle_review(args: &[&str], repo: &git2::Repository) -> Result<()> {
     if args.len() == 1 {
         let prs = github::find_assigned_prs(Some(&repo_id))?;
         if prs.is_empty() {
-            println!(
-                "No reviews assigned in {}/{}.",
-                repo_id.owner, repo_id.name
-            );
+            println!("No reviews assigned in {}/{}.", repo_id.owner, repo_id.name);
         } else {
             for pr in &prs {
                 println!(

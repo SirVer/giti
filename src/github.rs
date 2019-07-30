@@ -1,17 +1,17 @@
 // Extremely helpful was this: https://jsdw.me/posts/rust-asyncawait-preview/
 
-use serde::{Deserialize, Serialize};
 use crate::error::*;
 use hubcaps::search::SearchIssuesOptions;
 use hubcaps::{self, Credentials};
 use hyper;
 use hyper_tls;
+use serde::{Deserialize, Serialize};
 use std::env;
+use std::fmt::Display;
+use std::str::FromStr;
 use tokio::await;
 use tokio::prelude::*;
-use std::str::FromStr;
 use tokio_async_await::compat::backward::Compat;
-use std::fmt::Display;
 use url;
 
 // TODO(sirver): This state of async/await only allowed static references or owning data. So there
@@ -38,8 +38,11 @@ impl Branch {
     }
 }
 
-#[derive(Debug,PartialEq,Eq)]
-pub enum PullRequestState { Open, Closed }
+#[derive(Debug, PartialEq, Eq)]
+pub enum PullRequestState {
+    Open,
+    Closed,
+}
 
 impl FromStr for PullRequestState {
     type Err = String;
@@ -90,10 +93,13 @@ impl PullRequestId {
 
 impl Display for PullRequestId {
     fn fmt(&self, fmt: &mut std::fmt::Formatter<'_>) -> std::result::Result<(), std::fmt::Error> {
-        write!(fmt, "{}/{}#{}", self.repo.owner, self.repo.name, self.number)
+        write!(
+            fmt,
+            "{}/{}#{}",
+            self.repo.owner, self.repo.name, self.number
+        )
     }
 }
-
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub struct RepoId {
@@ -178,8 +184,7 @@ pub fn find_assigned_prs(repo: Option<&RepoId>) -> Result<Vec<PullRequest>> {
                     None => true,
                     Some(ref r) => pr_repo == r,
                 })
-                .map(|(pr_repo, pr)| 
-                    PullRequest {
+                .map(|(pr_repo, pr)| PullRequest {
                     source: Branch::from_label(&pr_repo.name, &pr.head.label),
                     target: Branch::from_label(&pr_repo.name, &pr.base.label),
                     number: pr.number as i32,
@@ -205,10 +210,12 @@ pub fn create_pr(repo: &RepoId, pull_options: hubcaps::pulls::PullOptions) -> Re
         async move {
             let github = Github::new("SirVer_giti/unspecified", Some(Credentials::Token(token)));
             let result = await!(github
-                                .repo(repo_clone.owner.to_string(), repo_clone.name.to_string())
-                                .pulls().create(&pull_options));
+                .repo(repo_clone.owner.to_string(), repo_clone.name.to_string())
+                .pulls()
+                .create(&pull_options));
             tx.lock().unwrap().send(result).unwrap();
-        });
+        },
+    );
 
     let pr = rx.recv().unwrap()?;
     Ok(PullRequest {
@@ -230,8 +237,8 @@ pub fn get_pr(pr_id: &PullRequestId) -> Result<PullRequest> {
     tokio::run_async(
         async move {
             let github = Github::new("SirVer_giti/unspecified", Some(Credentials::Token(token)));
-            let (_, pr) = await!(fetch_pr(github, pr_id_clone))
-                .expect("fetch_pr did not complete.");
+            let (_, pr) =
+                await!(fetch_pr(github, pr_id_clone)).expect("fetch_pr did not complete.");
             tx.lock().unwrap().send(pr).unwrap();
         },
     );
