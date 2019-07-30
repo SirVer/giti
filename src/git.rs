@@ -308,7 +308,6 @@ pub fn handle_cleanup(repo: &git2::Repository, dbase: &mut diffbase::Diffbase) -
             continue;
         }
 
-        // NOCOM(#sirver): g review could set the github pr too.
         if branch.starts_with('|') {
             run_command(&["git", "branch", "-D", &branch])?;
             continue;
@@ -353,7 +352,11 @@ pub fn handle_review_push(repo: &git2::Repository) -> Result<()> {
     Ok(())
 }
 
-pub fn handle_review(args: &[&str], repo: &git2::Repository) -> Result<()> {
+pub fn handle_review(
+    args: &[&str],
+    repo: &git2::Repository,
+    dbase: &mut diffbase::Diffbase,
+) -> Result<()> {
     let remotes = get_remotes()?;
 
     let master_origin = get_origin("master").unwrap();
@@ -387,25 +390,27 @@ pub fn handle_review(args: &[&str], repo: &git2::Repository) -> Result<()> {
         return handle_review_push(repo);
     }
 
-    let source_branch = if let Ok(pr_number) = args[1].parse::<i32>() {
+    let (source_branch, pr_id) = if let Ok(pr_number) = args[1].parse::<i32>() {
         let pr = github::get_pr(&github::PullRequestId {
             repo: repo_id.clone(),
             number: pr_number,
         })?;
-        pr.source
+        let pr_id = pr.id();
+        (pr.source, Some(pr_id))
     } else {
         let (user, branch) = {
             let mut it = args[1].splitn(2, ':');
             (it.next().unwrap(), it.next().unwrap())
         };
 
-        github::Branch {
+        let branch = github::Branch {
             repo: github::RepoId {
                 owner: user.to_string(),
                 name: repo_id.name.clone(),
             },
             name: branch.to_string(),
-        }
+        };
+        (branch, None)
     };
 
     let owner = if source_branch.repo == repo_id {
@@ -433,6 +438,9 @@ pub fn handle_review(args: &[&str], repo: &git2::Repository) -> Result<()> {
     }
 
     run_command(&["git", "branch", "--track", &local_branch, &branch_to_fork])?;
+    if let Some(pr_id) = pr_id {
+        dbase.set_github_pr(&local_branch, pr_id);
+    }
     checkout(repo, &local_branch)?;
     Ok(())
 }
@@ -615,7 +623,7 @@ pub fn handle_repository(original_args: &[&str]) -> Result<()> {
         "fix" => handle_fix(&expanded_args, &repo),
         "merge" => diffbase::handle_merge(&expanded_args, &repo, &mut dbase),
         "pullc" => diffbase::handle_pullc(&expanded_args, &repo, &mut dbase),
-        "review" => handle_review(&expanded_args, &repo),
+        "review" => handle_review(&expanded_args, &repo, &mut dbase),
         "start" => handle_start(&expanded_args, &repo),
         "up" => diffbase::handle_up(&expanded_args, &repo, &mut dbase),
         "pr" => handle_pr(&expanded_args, &repo, &mut dbase),
