@@ -86,13 +86,13 @@ impl Remote {
         owner_and_project.rsplitn(2, '/').nth(1).unwrap()
     }
 
-    pub fn repository(&self) -> github::Repo {
+    pub fn repository(&self) -> github::RepoId {
         let owner_and_project = self.url.rsplitn(2, ':').nth(0).unwrap();
         let mut name = owner_and_project.rsplitn(2, '/').nth(0).unwrap();
         if name.ends_with(".git") {
             name = &name[..name.len() - 4];
         }
-        github::Repo {
+        github::RepoId {
             owner: self.owner().to_string(),
             name: name.to_string(),
         }
@@ -315,18 +315,14 @@ pub fn handle_cleanup(repo: &git2::Repository, dbase: &mut diffbase::Diffbase) -
         }
 
         if let Some(pr_id) = dbase.get_github_pr(&branch) {
-            // NOCOM(#sirver): rename to RepoId
-            let repo_id = github::Repo {
-                owner: pr_id.repo_owner.clone(),
-                name: pr_id.repo_name.clone(),
-            };
-
-            let pr = github::get_pr(&repo_id, pr_id.number)?;
+            let pr = github::get_pr(&pr_id)?;
             if pr.state == github::PullRequestState::Closed {
                 let rev = repo.revparse_single(&branch)?;
                 println!(
                     "{} is closed. Deleting the branch {} ({}).",
-                    pr_id, branch, rev.id()
+                    pr_id,
+                    branch,
+                    rev.id()
                 );
                 run_command(&["git", "branch", "-D", &branch])?;
                 continue;
@@ -362,14 +358,14 @@ pub fn handle_review(args: &[&str], repo: &git2::Repository) -> Result<()> {
 
     let master_origin = get_origin("master").unwrap();
     let master_remote = &remotes[&master_origin.remote];
-    let github_repo = master_remote.repository();
+    let repo_id = master_remote.repository();
 
     if args.len() == 1 {
-        let prs = github::find_assigned_prs(Some(&github_repo))?;
+        let prs = github::find_assigned_prs(Some(&repo_id))?;
         if prs.is_empty() {
             println!(
                 "No reviews assigned in {}/{}.",
-                github_repo.owner, github_repo.name
+                repo_id.owner, repo_id.name
             );
         } else {
             for pr in &prs {
@@ -395,7 +391,10 @@ pub fn handle_review(args: &[&str], repo: &git2::Repository) -> Result<()> {
     }
 
     let source_branch = if let Ok(pr_number) = args[1].parse::<i32>() {
-        let pr = github::get_pr(&github_repo, pr_number)?;
+        let pr = github::get_pr(&github::PullRequestId {
+            repo: repo_id.clone(),
+            number: pr_number,
+        })?;
         pr.source
     } else {
         let (user, branch) = {
@@ -404,15 +403,15 @@ pub fn handle_review(args: &[&str], repo: &git2::Repository) -> Result<()> {
         };
 
         github::Branch {
-            repo: github::Repo {
+            repo: github::RepoId {
                 owner: user.to_string(),
-                name: github_repo.name.clone(),
+                name: repo_id.name.clone(),
             },
             name: branch.to_string(),
         }
     };
 
-    let owner = if source_branch.repo == github_repo {
+    let owner = if source_branch.repo == repo_id {
         "origin"
     } else {
         &source_branch.repo.owner
@@ -497,7 +496,7 @@ pub fn handle_pr(
 
     let master_origin = get_origin("master").unwrap();
     let base_remote = &remotes[&master_origin.remote];
-    let github_repo = base_remote.repository();
+    let repo_id = base_remote.repository();
 
     let local_branches = get_all_local_branches(&repo)?;
     let current_branch = get_current_branch(&repo);
@@ -557,7 +556,7 @@ pub fn handle_pr(
         base,
     };
 
-    let pr = github::create_pr(&github_repo, pull_options)?.id();
+    let pr = github::create_pr(&repo_id, pull_options)?.id();
     dbase.set_github_pr(&current_branch, pr.clone());
 
     println!("Opened #{}. Opening in web browser.", pr.number);

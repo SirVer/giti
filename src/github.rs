@@ -19,7 +19,7 @@ use url;
 
 #[derive(Debug)]
 pub struct Branch {
-    pub repo: Repo,
+    pub repo: RepoId,
     pub name: String,
 }
 
@@ -29,7 +29,7 @@ impl Branch {
         let owner = it.next().unwrap().to_string();
         let name = it.next().unwrap().to_string();
         Branch {
-            repo: Repo {
+            repo: RepoId {
                 owner: owner,
                 name: repo_name.to_string(),
             },
@@ -66,8 +66,7 @@ pub struct PullRequest {
 impl PullRequest {
     pub fn id(&self) -> PullRequestId {
         PullRequestId {
-            repo_owner: self.target.repo.owner.clone(),
-            repo_name: self.target.repo.name.clone(),
+            repo: self.target.repo.clone(),
             number: self.number,
         }
     }
@@ -76,9 +75,7 @@ impl PullRequest {
 /// An id containing just enough data to uniquely identify a pull request on GitHub.
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct PullRequestId {
-    // NOCOM(#sirver): this should use Repo struct.
-    pub repo_owner: String,
-    pub repo_name: String,
+    pub repo: RepoId,
     pub number: i32,
 }
 
@@ -86,20 +83,20 @@ impl PullRequestId {
     pub fn url(&self) -> String {
         format!(
             "https://github.com/{}/{}/pull/{}",
-            self.repo_owner, self.repo_name, self.number
+            self.repo.owner, self.repo.name, self.number
         )
     }
 }
 
 impl Display for PullRequestId {
     fn fmt(&self, fmt: &mut std::fmt::Formatter<'_>) -> std::result::Result<(), std::fmt::Error> {
-        write!(fmt, "{}/{}#{}", self.repo_owner, self.repo_name, self.number)
+        write!(fmt, "{}/{}#{}", self.repo.owner, self.repo.name, self.number)
     }
 }
 
 
-#[derive(Debug, Clone, PartialEq)]
-pub struct Repo {
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+pub struct RepoId {
     pub owner: String,
     pub name: String,
 }
@@ -117,21 +114,20 @@ pub fn repo_tuple(repository_url: &str) -> (String, String) {
 
 async fn fetch_pr(
     github: Github,
-    repo: Repo,
-    number: u64,
-) -> hubcaps::Result<(Repo, hubcaps::pulls::Pull)> {
+    pr_id: PullRequestId,
+) -> hubcaps::Result<(RepoId, hubcaps::pulls::Pull)> {
     let res = await!(github
-        .repo(repo.owner.to_string(), repo.name.to_string())
+        .repo(pr_id.repo.owner.to_string(), pr_id.repo.name.to_string())
         .pulls()
-        .get(number)
+        .get(pr_id.number as u64)
         .get())?;
-    Ok((repo, res))
+    Ok((pr_id.repo, res))
 }
 
 async fn find_assigned_pr_info(
     github: Github,
     login: String,
-) -> hubcaps::Result<Vec<(Repo, hubcaps::pulls::Pull)>> {
+) -> hubcaps::Result<Vec<(RepoId, hubcaps::pulls::Pull)>> {
     let mut search = github.search().issues().iter(
         format!("is:pr is:open archived:false assignee:{}", login,),
         &SearchIssuesOptions::builder().per_page(25).build(),
@@ -140,8 +136,11 @@ async fn find_assigned_pr_info(
     let mut futures = vec![];
     while let Some(Ok(result)) = await!(search.next()) {
         let (owner, name) = repo_tuple(&result.repository_url);
-        let repo = Repo { owner, name };
-        futures.push(Compat::new(fetch_pr(github.clone(), repo, result.number)));
+        let pr_id = PullRequestId {
+            repo: RepoId { owner, name },
+            number: result.number as i32,
+        };
+        futures.push(Compat::new(fetch_pr(github.clone(), pr_id)));
     }
 
     let mut results = vec![];
@@ -155,13 +154,13 @@ async fn find_login_name(github: Github) -> hubcaps::Result<String> {
     Ok(await!(github.users().authenticated())?.login)
 }
 
-async fn run(github: Github) -> hubcaps::Result<Vec<(Repo, hubcaps::pulls::Pull)>> {
+async fn run(github: Github) -> hubcaps::Result<Vec<(RepoId, hubcaps::pulls::Pull)>> {
     let login = await!(find_login_name(github.clone()))?;
     let res = await!(find_assigned_pr_info(github.clone(), login))?;
     Ok(res)
 }
 
-pub fn find_assigned_prs(repo: Option<&Repo>) -> Result<Vec<PullRequest>> {
+pub fn find_assigned_prs(repo: Option<&RepoId>) -> Result<Vec<PullRequest>> {
     let token = env::var("GITHUB_TOKEN")?;
 
     let repo = repo.map(|r| r.clone());
@@ -196,7 +195,7 @@ pub fn find_assigned_prs(repo: Option<&Repo>) -> Result<Vec<PullRequest>> {
     Ok(rx.recv().unwrap())
 }
 
-pub fn create_pr(repo: &Repo, pull_options: hubcaps::pulls::PullOptions) -> Result<PullRequest> {
+pub fn create_pr(repo: &RepoId, pull_options: hubcaps::pulls::PullOptions) -> Result<PullRequest> {
     let token = env::var("GITHUB_TOKEN")?;
 
     let repo_clone = repo.clone();
@@ -222,17 +221,16 @@ pub fn create_pr(repo: &Repo, pull_options: hubcaps::pulls::PullOptions) -> Resu
     })
 }
 
-// NOCOM(#sirver): this should take a PullRequestId
-pub fn get_pr(repo: &Repo, pr_id: i32) -> Result<PullRequest> {
+pub fn get_pr(pr_id: &PullRequestId) -> Result<PullRequest> {
     let token = env::var("GITHUB_TOKEN")?;
 
     let (tx, rx) = ::std::sync::mpsc::channel();
     let tx = ::std::sync::Mutex::new(tx);
-    let repo_clone = repo.clone();
+    let pr_id_clone = pr_id.clone();
     tokio::run_async(
         async move {
             let github = Github::new("SirVer_giti/unspecified", Some(Credentials::Token(token)));
-            let (_, pr) = await!(fetch_pr(github, repo_clone, pr_id as u64))
+            let (_, pr) = await!(fetch_pr(github, pr_id_clone))
                 .expect("fetch_pr did not complete.");
             tx.lock().unwrap().send(pr).unwrap();
         },
@@ -240,8 +238,8 @@ pub fn get_pr(repo: &Repo, pr_id: i32) -> Result<PullRequest> {
 
     let pr = rx.recv().unwrap();
     Ok(PullRequest {
-        source: Branch::from_label(&repo.name, &pr.head.label),
-        target: Branch::from_label(&repo.name, &pr.base.label),
+        source: Branch::from_label(&pr_id.repo.name, &pr.head.label),
+        target: Branch::from_label(&pr_id.repo.name, &pr.base.label),
         number: pr.number as i32,
         author_login: pr.user.login.clone(),
         title: pr.title.clone(),
