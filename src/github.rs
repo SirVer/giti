@@ -1,5 +1,6 @@
 // Extremely helpful was this: https://jsdw.me/posts/rust-asyncawait-preview/
 
+use serde::{Deserialize, Serialize};
 use crate::error::*;
 use hubcaps::search::SearchIssuesOptions;
 use hubcaps::{self, Credentials};
@@ -8,7 +9,9 @@ use hyper_tls;
 use std::env;
 use tokio::await;
 use tokio::prelude::*;
+use std::str::FromStr;
 use tokio_async_await::compat::backward::Compat;
+use std::fmt::Display;
 use url;
 
 // TODO(sirver): This state of async/await only allowed static references or owning data. So there
@@ -35,6 +38,20 @@ impl Branch {
     }
 }
 
+#[derive(Debug,PartialEq,Eq)]
+pub enum PullRequestState { Open, Closed }
+
+impl FromStr for PullRequestState {
+    type Err = String;
+    fn from_str(s: &str) -> std::result::Result<Self, String> {
+        match s {
+            "open" => Ok(PullRequestState::Open),
+            "closed" => Ok(PullRequestState::Closed),
+            _ => Err(format!("Invalid brach state: {}", s)),
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct PullRequest {
     // Repo where this PR is opened, e.g. "SirVer/UltiSnips"
@@ -43,7 +60,43 @@ pub struct PullRequest {
     pub number: i32,
     pub author_login: String,
     pub title: String,
+    pub state: PullRequestState,
 }
+
+impl PullRequest {
+    pub fn id(&self) -> PullRequestId {
+        PullRequestId {
+            repo_owner: self.target.repo.owner.clone(),
+            repo_name: self.target.repo.name.clone(),
+            number: self.number,
+        }
+    }
+}
+
+/// An id containing just enough data to uniquely identify a pull request on GitHub.
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct PullRequestId {
+    // NOCOM(#sirver): this should use Repo struct.
+    pub repo_owner: String,
+    pub repo_name: String,
+    pub number: i32,
+}
+
+impl PullRequestId {
+    pub fn url(&self) -> String {
+        format!(
+            "https://github.com/{}/{}/pull/{}",
+            self.repo_owner, self.repo_name, self.number
+        )
+    }
+}
+
+impl Display for PullRequestId {
+    fn fmt(&self, fmt: &mut std::fmt::Formatter<'_>) -> std::result::Result<(), std::fmt::Error> {
+        write!(fmt, "{}/{}#{}", self.repo_owner, self.repo_name, self.number)
+    }
+}
+
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Repo {
@@ -126,12 +179,14 @@ pub fn find_assigned_prs(repo: Option<&Repo>) -> Result<Vec<PullRequest>> {
                     None => true,
                     Some(ref r) => pr_repo == r,
                 })
-                .map(|(pr_repo, pr)| PullRequest {
+                .map(|(pr_repo, pr)| 
+                    PullRequest {
                     source: Branch::from_label(&pr_repo.name, &pr.head.label),
                     target: Branch::from_label(&pr_repo.name, &pr.base.label),
                     number: pr.number as i32,
                     author_login: pr.user.login.clone(),
                     title: pr.title.clone(),
+                    state: PullRequestState::from_str(&pr.state).unwrap(),
                 })
                 .collect::<Vec<_>>();
             tx.lock().unwrap().send(new_result).unwrap();
@@ -157,16 +212,17 @@ pub fn create_pr(repo: &Repo, pull_options: hubcaps::pulls::PullOptions) -> Resu
         });
 
     let pr = rx.recv().unwrap()?;
-
     Ok(PullRequest {
         source: Branch::from_label(&repo.name, &pr.head.label),
         target: Branch::from_label(&repo.name, &pr.base.label),
         number: pr.number as i32,
         author_login: pr.user.login.clone(),
         title: pr.title.clone(),
+        state: PullRequestState::from_str(&pr.state).unwrap(),
     })
 }
 
+// NOCOM(#sirver): this should take a PullRequestId
 pub fn get_pr(repo: &Repo, pr_id: i32) -> Result<PullRequest> {
     let token = env::var("GITHUB_TOKEN")?;
 
@@ -183,12 +239,12 @@ pub fn get_pr(repo: &Repo, pr_id: i32) -> Result<PullRequest> {
     );
 
     let pr = rx.recv().unwrap();
-
     Ok(PullRequest {
         source: Branch::from_label(&repo.name, &pr.head.label),
         target: Branch::from_label(&repo.name, &pr.base.label),
         number: pr.number as i32,
         author_login: pr.user.login.clone(),
         title: pr.title.clone(),
+        state: PullRequestState::from_str(&pr.state).unwrap(),
     })
 }

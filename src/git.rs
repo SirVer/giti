@@ -68,7 +68,7 @@ pub fn get_all_local_branches(repo: &git2::Repository) -> Result<HashMap<String,
     Ok(results)
 }
 
-#[derive(Debug,PartialEq,Eq)]
+#[derive(Debug, PartialEq, Eq)]
 /// Could be git@github.com:SirVer/giti.git.
 struct Remote {
     url: String,
@@ -300,13 +300,42 @@ pub fn handle_fix(args: &[&str], repo: &git2::Repository) -> Result<()> {
     Ok(())
 }
 
-pub fn handle_cleanup(repo: &git2::Repository) -> Result<()> {
+pub fn handle_cleanup(repo: &git2::Repository, dbase: &mut diffbase::Diffbase) -> Result<()> {
     let current_branch = get_current_branch(repo);
+
     for branch in get_all_local_branch_names(repo)? {
-        if branch.starts_with('|') && branch != current_branch {
+        if branch == current_branch {
+            continue;
+        }
+
+        // NOCOM(#sirver): g review could set the github pr too.
+        if branch.starts_with('|') {
             run_command(&["git", "branch", "-D", &branch])?;
+            continue;
+        }
+
+        if let Some(pr_id) = dbase.get_github_pr(&branch) {
+            // NOCOM(#sirver): rename to RepoId
+            let repo_id = github::Repo {
+                owner: pr_id.repo_owner.clone(),
+                name: pr_id.repo_name.clone(),
+            };
+
+            let pr = github::get_pr(&repo_id, pr_id.number)?;
+            if pr.state == github::PullRequestState::Closed {
+                let rev = repo.revparse_single(&branch)?;
+                println!(
+                    "{} is closed. Deleting the branch {} ({}).",
+                    pr_id, branch, rev.id()
+                );
+                run_command(&["git", "branch", "-D", &branch])?;
+                continue;
+            }
         }
     }
+
+    // Delete branches that have been merged upstream.
+
     Ok(())
 }
 
@@ -462,7 +491,7 @@ pub fn handle_clone(args: &[&str]) -> Result<()> {
 pub fn handle_pr(
     _args: &[&str],
     repo: &git2::Repository,
-    _: &mut diffbase::Diffbase,
+    dbase: &mut diffbase::Diffbase,
 ) -> Result<()> {
     let remotes = get_remotes()?;
 
@@ -470,7 +499,6 @@ pub fn handle_pr(
     let base_remote = &remotes[&master_origin.remote];
     let github_repo = base_remote.repository();
 
-    println!("#sirver ALIVE {}:{}", file!(), line!());
     let local_branches = get_all_local_branches(&repo)?;
     let current_branch = get_current_branch(&repo);
     if local_branches[&current_branch].upstream.is_none() {
@@ -484,24 +512,27 @@ pub fn handle_pr(
     let head_upstream = &local_branches[&current_branch].upstream.clone().unwrap();
     let head_remote = &remotes[head_upstream.split('/').next().unwrap()];
 
-    // NOCOM(#sirver): check if diffbase already has a PR associated with this.
     expect_working_directory_clean()?;
 
-    println!("#sirver ALIVE {}:{}", file!(), line!());
+    if let Some(pr) = dbase.get_github_pr(&current_branch) {
+        return Err(Error::general(format!(
+            "current branch already has the PR {} associated with it. \
+             Refuse to open a new pull request.",
+            pr
+        )));
+    }
+
+    // Get commit message.
     let file = tempfile::Builder::new()
         .prefix("COMMIT_EDITMSG")
         .rand_bytes(0)
         .tempfile()?;
     run_editor(&file.path())?;
-
-    println!("#sirver ALIVE {}:{}", file!(), line!());
     let content = ::std::fs::read_to_string(&file.path())?.trim().to_string();
     let lines: Vec<String> = content.lines().map(|l| l.trim().to_string()).collect();
-    println!("#sirver ALIVE {}:{}", file!(), line!());
     if lines.is_empty() {
         return Err(Error::general("No message, no PR.".into()));
     }
-    println!("#sirver ALIVE {}:{}", file!(), line!());
     let title = lines[0].to_string();
     let body = if lines.len() > 2 {
         Some(lines[2..].join("\n"))
@@ -509,24 +540,16 @@ pub fn handle_pr(
         None
     };
 
-    println!("#sirver ALIVE {}:{}", file!(), line!());
     // Target to merge into.
     let base = "master".to_string();
 
-    println!("#sirver ALIVE {}:{}", file!(), line!());
     // Base to merge from. If it is in the same fork as base, it must not contain the owners name.
-    println!("#sirver ALIVE {}:{}", file!(), line!());
-    println!("#sirver head_remote: {:#?},base_remote: {:#?}", head_remote, base_remote);
-    println!("#sirver remotes: {:#?}", remotes);
     let head = if head_remote == base_remote {
-    println!("#sirver ALIVE {}:{}", file!(), line!());
-        current_branch
+        current_branch.clone()
     } else {
-    println!("#sirver ALIVE {}:{}", file!(), line!());
         format!("{}/{}", head_remote.owner(), current_branch)
     };
 
-    println!("#sirver ALIVE {}:{}", file!(), line!());
     let pull_options = hubcaps::pulls::PullOptions {
         title,
         body,
@@ -534,18 +557,11 @@ pub fn handle_pr(
         base,
     };
 
-    println!("#sirver ALIVE {}:{}", file!(), line!());
-    println!("#sirver pull_options: {:#?}", pull_options);
+    let pr = github::create_pr(&github_repo, pull_options)?.id();
+    dbase.set_github_pr(&current_branch, pr.clone());
 
-    let pr = github::create_pr(&github_repo, pull_options)?;
     println!("Opened #{}. Opening in web browser.", pr.number);
-
-    println!("#sirver pr: {:#?}", pr);
-
-    let _ = webbrowser::open(&format!(
-        "https://github.com/{}/{}/pull/{}",
-        pr.target.repo.owner, pr.target.repo.name, pr.number
-    ));
+    let _ = webbrowser::open(&pr.url());
 
     Ok(())
 }
@@ -598,7 +614,7 @@ pub fn handle_repository(original_args: &[&str]) -> Result<()> {
         // Intercepted commands.
         "branch" => diffbase::handle_branch(&expanded_args, &repo, &mut dbase),
         "checkout" => diffbase::handle_checkout(&expanded_args, &repo, &mut dbase),
-        "cleanup" => handle_cleanup(&repo),
+        "cleanup" => handle_cleanup(&repo, &mut dbase),
         "down" => diffbase::handle_down(&expanded_args, &repo, &mut dbase),
         "fix" => handle_fix(&expanded_args, &repo),
         "merge" => diffbase::handle_merge(&expanded_args, &repo, &mut dbase),

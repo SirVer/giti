@@ -1,6 +1,7 @@
 use crate::dispatch::{dispatch_to, run_command};
 use crate::error::{Error, ErrorKind, Result};
 use crate::git;
+use crate::github::PullRequestId;
 use getopts;
 use git2;
 use serde::{Deserialize, Serialize};
@@ -15,12 +16,14 @@ use std::path;
 pub struct DiffbaseJson {
     branch: String,
     diffbase: Option<String>,
+    github_pr: Option<PullRequestId>,
 }
 
 #[derive(Debug, Default)]
 struct DiffbaseEntry {
     parent: Option<String>,
     children: Vec<String>,
+    github_pr: Option<PullRequestId>,
 }
 
 pub struct Diffbase {
@@ -41,6 +44,7 @@ impl Diffbase {
                 DiffbaseEntry {
                     children: Vec::new(),
                     parent: None,
+                    github_pr: None,
                 },
             );
         }
@@ -55,7 +59,7 @@ impl Diffbase {
             .and_then(|mut file: File| file.read_to_string(&mut content))?;
         let diffbase_json: Vec<DiffbaseJson> = serde_json::from_str(&content)?;
 
-        for entry in &diffbase_json {
+        for entry in diffbase_json {
             if !diffbase.entries.contains_key(&entry.branch) {
                 println!(
                     "Branch {} no longer exists. Removing it from the diffbase map.",
@@ -63,6 +67,8 @@ impl Diffbase {
                 );
                 continue;
             }
+
+            diffbase.entries.get_mut(&entry.branch).unwrap().github_pr = entry.github_pr;
 
             let parent_name = match entry.diffbase {
                 None => continue,
@@ -111,6 +117,7 @@ impl Diffbase {
             json_entries.push(DiffbaseJson {
                 branch: key.to_string(),
                 diffbase: entry.parent.clone(),
+                github_pr: entry.github_pr.clone(),
             });
         }
         let json_string = serde_json::to_string_pretty(&json_entries)?;
@@ -174,6 +181,17 @@ impl Diffbase {
                 }
             }
         }
+    }
+
+    pub fn get_github_pr(&self, branch: &str) -> Option<&PullRequestId> {
+        self.entries.get(branch).and_then(|b| b.github_pr.as_ref())
+    }
+
+    pub fn set_github_pr(&mut self, branch: &str, pr: PullRequestId) {
+        if !self.entries.contains_key(branch) {
+            self.entries.insert(branch.to_string(), Default::default());
+        }
+        self.entries.get_mut(branch).unwrap().github_pr = Some(pr);
     }
 }
 
