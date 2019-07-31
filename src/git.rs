@@ -5,6 +5,7 @@ use crate::Error;
 use crate::Result;
 use git2;
 use std::collections::{HashMap, HashSet};
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::str;
 use webbrowser;
@@ -526,13 +527,19 @@ pub fn handle_pr(
         )));
     }
 
-    // Get commit message.
-    let file = tempfile::Builder::new()
+    // Get PR original post message.
+    let mut temp_file = tempfile::Builder::new()
         .prefix("COMMIT_EDITMSG")
         .rand_bytes(0)
         .tempfile()?;
-    run_editor(&file.path())?;
-    let content = ::std::fs::read_to_string(&file.path())?.trim().to_string();
+
+    if let Some(msg) = github::get_pull_request_template(&repo.workdir().unwrap()) {
+        temp_file.write_all(msg.as_bytes())?
+    }
+    let temp_path = temp_file.into_temp_path();
+
+    run_editor(&temp_path)?;
+    let content = ::std::fs::read_to_string(&temp_path)?.trim().to_string();
     let lines: Vec<String> = content.lines().map(|l| l.trim().to_string()).collect();
     if lines.is_empty() {
         return Err(Error::general("No message, no PR.".into()));

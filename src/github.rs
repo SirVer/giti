@@ -8,6 +8,7 @@ use hyper_tls;
 use serde::{Deserialize, Serialize};
 use std::env;
 use std::fmt::Display;
+use std::path::Path;
 use std::str::FromStr;
 use tokio::await;
 use tokio::prelude::*;
@@ -252,4 +253,30 @@ pub fn get_pr(pr_id: &PullRequestId) -> Result<PullRequest> {
         title: pr.title.clone(),
         state: PullRequestState::from_str(&pr.state).unwrap(),
     })
+}
+
+pub fn get_pull_request_template(workdir: &Path) -> Option<String> {
+    for sub_path in &[".github", "docs", "."] {
+        let files = match ::std::fs::read_dir(&workdir.join(sub_path)) {
+            Err(_) => continue,
+            Ok(r) => r,
+        };
+        for f in files {
+            let p = match f {
+                Err(_) => continue,
+                Ok(d) => d.path(),
+            };
+            let stem = p
+                .file_stem()
+                .map(|s| s.to_string_lossy().to_string())
+                .unwrap_or_else(String::new)
+                .to_lowercase();
+            if stem == "pull_request_template" {
+                return ::std::fs::read_to_string(p)
+                    .map(|s| Some(s))
+                    .unwrap_or(None);
+            }
+        }
+    }
+    None
 }
