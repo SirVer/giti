@@ -5,6 +5,7 @@ use hubcaps::search::SearchIssuesOptions;
 use hubcaps::{self, Credentials};
 use hyper;
 use hyper_tls;
+use std::path::Path;
 use serde::{Deserialize, Serialize};
 use std::env;
 use std::fmt::Display;
@@ -252,4 +253,17 @@ pub fn get_pr(pr_id: &PullRequestId) -> Result<PullRequest> {
         title: pr.title.clone(),
         state: PullRequestState::from_str(&pr.state).unwrap(),
     })
+}
+
+pub fn get_pull_request_template(workdir: &Path) -> Option<String> {
+    for sub_path in &[".github", "docs", "."] {
+        let files = match ::std::fs::read_dir(&workdir.join(sub_path)) {
+            Err(_) => continue,
+            Ok(r) => r,
+        };
+        for f in files {
+            println!("#sirver f: {:#?}", f);
+        }
+    }
+    unimplemented!();
 }

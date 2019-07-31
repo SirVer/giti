@@ -526,6 +526,8 @@ pub fn handle_pr(
         )));
     }
 
+    let template = github::get_pull_request_template(&repo.workdir().unwrap());
+
     // Get commit message.
     let file = tempfile::Builder::new()
         .prefix("COMMIT_EDITMSG")
