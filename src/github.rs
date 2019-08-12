@@ -1,6 +1,7 @@
 // Extremely helpful was this: https://jsdw.me/posts/rust-asyncawait-preview/
 
 use crate::error::*;
+use chrono::{Date, Local};
 use hubcaps::search::SearchIssuesOptions;
 use hubcaps::{self, Credentials};
 use hyper;
@@ -131,14 +132,14 @@ async fn fetch_pr(
     Ok((pr_id.repo, res))
 }
 
-async fn find_assigned_pr_info(
+async fn search_prs(
     github: Github,
-    login: String,
+    query: String,
 ) -> hubcaps::Result<Vec<(RepoId, hubcaps::pulls::Pull)>> {
-    let mut search = github.search().issues().iter(
-        format!("is:pr is:open archived:false assignee:{}", login,),
-        &SearchIssuesOptions::builder().per_page(25).build(),
-    );
+    let mut search = github
+        .search()
+        .issues()
+        .iter(query, &SearchIssuesOptions::builder().per_page(25).build());
 
     let mut futures = vec![];
     while let Some(Ok(result)) = await!(search.next()) {
@@ -161,10 +162,26 @@ async fn find_login_name(github: Github) -> hubcaps::Result<String> {
     Ok(await!(github.users().authenticated())?.login)
 }
 
-async fn run(github: Github) -> hubcaps::Result<Vec<(RepoId, hubcaps::pulls::Pull)>> {
+async fn run_find_assigned_prs(
+    github: Github,
+) -> hubcaps::Result<Vec<(RepoId, hubcaps::pulls::Pull)>> {
     let login = await!(find_login_name(github.clone()))?;
-    let res = await!(find_assigned_pr_info(github.clone(), login))?;
+    let query = format!("is:pr is:open archived:false assignee:{}", login);
+    let res = await!(search_prs(github.clone(), query))?;
     Ok(res)
+}
+
+fn search_result_to_pull_requests(prs: Vec<(RepoId, hubcaps::pulls::Pull)>) -> Vec<PullRequest> {
+    prs.iter()
+        .map(|(pr_repo, pr)| PullRequest {
+            source: Branch::from_label(&pr_repo.name, &pr.head.label),
+            target: Branch::from_label(&pr_repo.name, &pr.base.label),
+            number: pr.number as i32,
+            author_login: pr.user.login.clone(),
+            title: pr.title.clone(),
+            state: PullRequestState::from_str(&pr.state).unwrap(),
+        })
+        .collect()
 }
 
 pub fn find_assigned_prs(repo: Option<&RepoId>) -> Result<Vec<PullRequest>> {
@@ -176,25 +193,52 @@ pub fn find_assigned_prs(repo: Option<&RepoId>) -> Result<Vec<PullRequest>> {
     tokio::run_async(
         async move {
             let github = Github::new("SirVer_giti/unspecified", Some(Credentials::Token(token)));
-            let mut prs = await!(run(github.clone())).expect("run() did not succeed.");
+            let mut prs = await!(run_find_assigned_prs(github.clone()))
+                .expect("run_find_assigned_prs() did not succeed.");
             prs.sort_by_key(|(_, pr)| pr.number);
 
-            let new_result = prs
-                .iter()
-                .filter(|(pr_repo, _)| match repo {
-                    None => true,
-                    Some(ref r) => pr_repo == r,
-                })
-                .map(|(pr_repo, pr)| PullRequest {
-                    source: Branch::from_label(&pr_repo.name, &pr.head.label),
-                    target: Branch::from_label(&pr_repo.name, &pr.base.label),
-                    number: pr.number as i32,
-                    author_login: pr.user.login.clone(),
-                    title: pr.title.clone(),
-                    state: PullRequestState::from_str(&pr.state).unwrap(),
-                })
-                .collect::<Vec<_>>();
+            let new_result = search_result_to_pull_requests(
+                prs.into_iter()
+                    .filter(|(pr_repo, _)| match repo {
+                        None => true,
+                        Some(ref r) => pr_repo == r,
+                    })
+                    .collect(),
+            );
+
             tx.lock().unwrap().send(new_result).unwrap();
+        },
+    );
+
+    Ok(rx.recv().unwrap())
+}
+
+pub fn find_my_prs(
+    start_date: Date<Local>,
+    end_date: Date<Local>,
+) -> Result<Vec<PullRequest>> {
+    let token = env::var("GITHUB_TOKEN")?;
+
+    let (tx, rx) = ::std::sync::mpsc::channel();
+    let tx = ::std::sync::Mutex::new(tx);
+    tokio::run_async(
+        async move {
+            let github = Github::new("SirVer_giti/unspecified", Some(Credentials::Token(token)));
+
+            let login =
+                await!(find_login_name(github.clone())).expect("Could not find GitHub login.");
+            let query = format!(
+                "is:pr author:{} created:{}..{}",
+                login,
+                start_date.format("%Y-%m-%d"),
+                end_date.format("%Y-%m-%d")
+            );
+            let prs = await!(search_prs(github.clone(), query)).expect("Could not search for PRs.");
+
+            let mut results = search_result_to_pull_requests(prs);
+            results.sort_by_key(|pr| (pr.target.repo.name.clone(), pr.number));
+
+            tx.lock().unwrap().send(results).unwrap();
         },
     );
 

@@ -3,6 +3,7 @@ use crate::dispatch::{communicate, dispatch_to, run_command, run_editor};
 use crate::github;
 use crate::Error;
 use crate::Result;
+use chrono::{Local, NaiveDate, TimeZone};
 use git2;
 use std::collections::{HashMap, HashSet};
 use std::io::Write;
@@ -493,6 +494,74 @@ pub fn handle_clone(args: &[&str]) -> Result<()> {
     Ok(())
 }
 
+pub fn handle_prs(args: &[&str]) -> Result<()> {
+    let mut opts = getopts::Options::new();
+    opts.optopt(
+        "s",
+        "start_date",
+        "Use this start date. [today - 21 days].",
+        "YYYY-MM-DD",
+    );
+    opts.optopt(
+        "e",
+        "end_date",
+        "Use this end date. [today - 21 days].",
+        "YYYY-MM-DD",
+    );
+
+    let matches = match opts.parse(&args[1..]) {
+        Ok(m) => m,
+        Err(err) => {
+            let brief = format!("{}\nUsage: g up [options]", err);
+            return Err(Error::general(opts.usage(&brief)));
+        }
+    };
+
+    let today = Local::today();
+    let start = match matches.opt_str("start_date") {
+        None => today
+            .checked_sub_signed(chrono::Duration::days(21))
+            .expect("This should not underflow."),
+        Some(s) => Local
+            .from_local_date(&NaiveDate::parse_from_str(&s, "%Y-%m-%d")?)
+            .single()
+            .unwrap(),
+    };
+    let end = match matches.opt_str("end_date") {
+        None => today,
+        Some(s) => Local
+            .from_local_date(&NaiveDate::parse_from_str(&s, "%Y-%m-%d")?)
+            .single()
+            .unwrap(),
+    };
+
+    println!(
+        "Finding prs from {} to {}.",
+        start.format("%Y-%m-%d"),
+        end.format("%Y-%m-%d")
+    );
+
+    let prs = github::find_my_prs(start, end)?;
+
+    let (mut open, mut closed) = prs
+        .into_iter()
+        .partition::<Vec<_>, _>(|pr| pr.state == github::PullRequestState::Open);
+    open.sort_by_key(|p| (p.target.repo.name.clone(), p.number));
+    closed.sort_by_key(|p| (p.target.repo.name.clone(), p.number));
+
+    println!("Closed:");
+    for p in closed {
+        println!("  - [#{} • {}]({})", p.number, p.title, p.id().url());
+    }
+
+    println!("\nStill open:");
+    for p in open {
+        println!("  - [#{} • {}]({})", p.number, p.title, p.id().url());
+    }
+
+    Ok(())
+}
+
 pub fn handle_pr(
     _args: &[&str],
     repo: &git2::Repository,
@@ -611,6 +680,7 @@ pub fn handle_repository(original_args: &[&str]) -> Result<()> {
         // Intercepted commands.
         "open_reviews" => return handle_open_reviews(&expanded_args),
         "clone" => return handle_clone(&expanded_args),
+        "prs" => return handle_prs(&expanded_args),
         _ => (),
     };
 

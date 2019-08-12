@@ -2,7 +2,7 @@
 authors = ["Holger Rapp <HolgerRapp@gmx.net>"]
 edition = "2018"
 name = "giti"
-version = "0.6.1"
+version = "0.7.0"
 
 [dependencies]
 default-editor = "0.1.0"
@@ -20,6 +20,7 @@ term = "0.5.1"
 tokio-async-await = "0.1.4"
 url = "1.7.1"
 webbrowser = "0.3.1"
+chrono = "0.4.7"
 
 [dependencies.serde]
 features = ["derive"]
