@@ -640,7 +640,7 @@ pub fn handle_pr(
     let pr = github::create_pr(&repo_id, pull_options)?.id();
     dbase.set_github_pr(&current_branch, pr.clone());
 
-    println!("Opened #{}. Opening in web browser.", pr.number);
+    println!("Opened {}. Opening in web browser.", pr.url());
     let _ = webbrowser::open(&pr.url());
 
     Ok(())
