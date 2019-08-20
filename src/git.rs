@@ -83,14 +83,17 @@ impl Remote {
         self.url.rsplitn(2, '/').nth(0).unwrap()
     }
 
+    fn owner_and_project(&self) -> &str {
+        const GITHUB_HTTPS: &str =  "https://github.com/";
+        self.url.trim_start_matches(GITHUB_HTTPS).rsplitn(2, ':').nth(0).unwrap()
+    }
+
     pub fn owner(&self) -> &str {
-        let owner_and_project = self.url.rsplitn(2, ':').nth(0).unwrap();
-        owner_and_project.rsplitn(2, '/').nth(1).unwrap()
+        self.owner_and_project().rsplitn(2, '/').nth(1).unwrap()
     }
 
     pub fn repository(&self) -> github::RepoId {
-        let owner_and_project = self.url.rsplitn(2, ':').nth(0).unwrap();
-        let mut name = owner_and_project.rsplitn(2, '/').nth(0).unwrap();
+        let mut name = self.owner_and_project().rsplitn(2, '/').nth(0).unwrap();
         if name.ends_with(".git") {
             name = &name[..name.len() - 4];
         }
@@ -627,7 +630,7 @@ pub fn handle_pr(
     let head = if head_remote == base_remote {
         current_branch.clone()
     } else {
-        format!("{}/{}", head_remote.owner(), current_branch)
+        format!("{}:{}", head_remote.owner(), current_branch)
     };
 
     let pull_options = hubcaps::pulls::PullOptions {
