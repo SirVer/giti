@@ -1,19 +1,13 @@
-// Extremely helpful was this: https://jsdw.me/posts/rust-asyncawait-preview/
-
 use crate::error::*;
 use chrono::{Date, Local};
 use hubcaps::search::SearchIssuesOptions;
 use hubcaps::{self, Credentials};
-use hyper;
-use hyper_tls;
 use serde::{Deserialize, Serialize};
 use std::env;
 use std::fmt::Display;
 use std::path::Path;
 use std::str::FromStr;
-use tokio::await;
-use tokio::prelude::*;
-use tokio_async_await::compat::backward::Compat;
+use tokio::stream::StreamExt;
 use url;
 
 // TODO(sirver): This state of async/await only allowed static references or owning data. So there
@@ -109,7 +103,7 @@ pub struct RepoId {
     pub name: String,
 }
 
-type Github = hubcaps::Github<hyper_tls::HttpsConnector<hyper::client::HttpConnector>>;
+type Github = hubcaps::Github;
 
 // bug fixed version from hubcaps: http://lessis.me/hubcaps/src/hubcaps/search/mod.rs.html#229-235
 pub fn repo_tuple(repository_url: &str) -> (String, String) {
@@ -124,11 +118,12 @@ async fn fetch_pr(
     github: Github,
     pr_id: PullRequestId,
 ) -> hubcaps::Result<(RepoId, hubcaps::pulls::Pull)> {
-    let res = await!(github
+    let res = github
         .repo(pr_id.repo.owner.to_string(), pr_id.repo.name.to_string())
         .pulls()
         .get(pr_id.number as u64)
-        .get())?;
+        .get()
+        .await?;
     Ok((pr_id.repo, res))
 }
 
@@ -142,32 +137,32 @@ async fn search_prs(
         .iter(query, &SearchIssuesOptions::builder().per_page(25).build());
 
     let mut futures = vec![];
-    while let Some(Ok(result)) = await!(search.next()) {
+    while let Some(Ok(result)) = search.next().await {
         let (owner, name) = repo_tuple(&result.repository_url);
         let pr_id = PullRequestId {
             repo: RepoId { owner, name },
             number: result.number as i32,
         };
-        futures.push(Compat::new(fetch_pr(github.clone(), pr_id)));
+        futures.push(fetch_pr(github.clone(), pr_id));
     }
 
     let mut results = vec![];
-    for rv in await!(tokio::prelude::future::join_all(futures))? {
-        results.push(rv);
+    for rv in futures::future::join_all(futures).await {
+        results.push(rv?);
     }
     Ok(results)
 }
 
 async fn find_login_name(github: Github) -> hubcaps::Result<String> {
-    Ok(await!(github.users().authenticated())?.login)
+    Ok(github.users().authenticated().await?.login)
 }
 
 async fn run_find_assigned_prs(
     github: Github,
 ) -> hubcaps::Result<Vec<(RepoId, hubcaps::pulls::Pull)>> {
-    let login = await!(find_login_name(github.clone()))?;
+    let login = find_login_name(github.clone()).await?;
     let query = format!("is:pr is:open archived:false assignee:{}", login);
-    let res = await!(search_prs(github.clone(), query))?;
+    let res = search_prs(github.clone(), query).await?;
     Ok(res)
 }
 
@@ -184,85 +179,81 @@ fn search_result_to_pull_requests(prs: Vec<(RepoId, hubcaps::pulls::Pull)>) -> V
         .collect()
 }
 
-pub fn find_assigned_prs(repo: Option<&RepoId>) -> Result<Vec<PullRequest>> {
+pub async fn find_assigned_prs(repo: Option<&RepoId>) -> Result<Vec<PullRequest>> {
     let token = env::var("GITHUB_TOKEN")?;
-
     let repo = repo.map(|r| r.clone());
-    let (tx, rx) = ::std::sync::mpsc::channel();
-    let tx = ::std::sync::Mutex::new(tx);
-    tokio::run_async(
-        async move {
-            let github = Github::new("SirVer_giti/unspecified", Some(Credentials::Token(token)));
-            let mut prs = await!(run_find_assigned_prs(github.clone()))
-                .expect("run_find_assigned_prs() did not succeed.");
-            prs.sort_by_key(|(_, pr)| pr.number);
 
-            let new_result = search_result_to_pull_requests(
-                prs.into_iter()
-                    .filter(|(pr_repo, _)| match repo {
-                        None => true,
-                        Some(ref r) => pr_repo == r,
-                    })
-                    .collect(),
-            );
+    async move {
+        let github = Github::new("SirVer_giti/unspecified", Some(Credentials::Token(token)))
+            .expect("GitHub could not be constructed");
+        let mut prs = run_find_assigned_prs(github.clone())
+            .await
+            .expect("run_find_assigned_prs() did not succeed.");
+        prs.sort_by_key(|(_, pr)| pr.number);
 
-            tx.lock().unwrap().send(new_result).unwrap();
-        },
-    );
+        let new_result = search_result_to_pull_requests(
+            prs.into_iter()
+                .filter(|(pr_repo, _)| match repo {
+                    None => true,
+                    Some(ref r) => pr_repo == r,
+                })
+                .collect(),
+        );
 
-    Ok(rx.recv().unwrap())
+        Ok(new_result)
+    }
+    .await
 }
 
-pub fn find_my_prs(
+pub async fn find_my_prs(
     start_date: Date<Local>,
     end_date: Date<Local>,
 ) -> Result<Vec<PullRequest>> {
     let token = env::var("GITHUB_TOKEN")?;
 
-    let (tx, rx) = ::std::sync::mpsc::channel();
-    let tx = ::std::sync::Mutex::new(tx);
-    tokio::run_async(
-        async move {
-            let github = Github::new("SirVer_giti/unspecified", Some(Credentials::Token(token)));
+    async move {
+        let github = Github::new("SirVer_giti/unspecified", Some(Credentials::Token(token)))
+            .expect("GitHub could not be constructed");
 
-            let login =
-                await!(find_login_name(github.clone())).expect("Could not find GitHub login.");
-            let query = format!(
-                "is:pr author:{} created:{}..{}",
-                login,
-                start_date.format("%Y-%m-%d"),
-                end_date.format("%Y-%m-%d")
-            );
-            let prs = await!(search_prs(github.clone(), query)).expect("Could not search for PRs.");
+        let login = find_login_name(github.clone())
+            .await
+            .expect("Could not find GitHub login.");
+        let query = format!(
+            "is:pr author:{} created:{}..{}",
+            login,
+            start_date.format("%Y-%m-%d"),
+            end_date.format("%Y-%m-%d")
+        );
+        let prs = search_prs(github.clone(), query)
+            .await
+            .expect("Could not search for PRs.");
 
-            let mut results = search_result_to_pull_requests(prs);
-            results.sort_by_key(|pr| (pr.target.repo.name.clone(), pr.number));
-
-            tx.lock().unwrap().send(results).unwrap();
-        },
-    );
-
-    Ok(rx.recv().unwrap())
+        let mut results = search_result_to_pull_requests(prs);
+        results.sort_by_key(|pr| (pr.target.repo.name.clone(), pr.number));
+        Ok(results)
+    }
+    .await
 }
 
-pub fn create_pr(repo: &RepoId, pull_options: hubcaps::pulls::PullOptions) -> Result<PullRequest> {
+pub async fn create_pr(
+    repo: &RepoId,
+    pull_options: hubcaps::pulls::PullOptions,
+) -> Result<PullRequest> {
     let token = env::var("GITHUB_TOKEN")?;
 
     let repo_clone = repo.clone();
-    let (tx, rx) = ::std::sync::mpsc::channel();
-    let tx = ::std::sync::Mutex::new(tx);
-    tokio::run_async(
-        async move {
-            let github = Github::new("SirVer_giti/unspecified", Some(Credentials::Token(token)));
-            let result = await!(github
-                .repo(repo_clone.owner.to_string(), repo_clone.name.to_string())
-                .pulls()
-                .create(&pull_options));
-            tx.lock().unwrap().send(result).unwrap();
-        },
-    );
+    let pr = async move {
+        let github = Github::new("SirVer_giti/unspecified", Some(Credentials::Token(token)))
+            .expect("GitHub could not be constructed");
+        let result = github
+            .repo(repo_clone.owner.to_string(), repo_clone.name.to_string())
+            .pulls()
+            .create(&pull_options)
+            .await;
+        result
+    }
+    .await?;
 
-    let pr = rx.recv().unwrap()?;
     Ok(PullRequest {
         source: Branch::from_label(&repo.name, &pr.head.label),
         target: Branch::from_label(&repo.name, &pr.base.label),
@@ -273,22 +264,20 @@ pub fn create_pr(repo: &RepoId, pull_options: hubcaps::pulls::PullOptions) -> Re
     })
 }
 
-pub fn get_pr(pr_id: &PullRequestId) -> Result<PullRequest> {
+pub async fn get_pr(pr_id: &PullRequestId) -> Result<PullRequest> {
     let token = env::var("GITHUB_TOKEN")?;
 
-    let (tx, rx) = ::std::sync::mpsc::channel();
-    let tx = ::std::sync::Mutex::new(tx);
     let pr_id_clone = pr_id.clone();
-    tokio::run_async(
-        async move {
-            let github = Github::new("SirVer_giti/unspecified", Some(Credentials::Token(token)));
-            let (_, pr) =
-                await!(fetch_pr(github, pr_id_clone)).expect("fetch_pr did not complete.");
-            tx.lock().unwrap().send(pr).unwrap();
-        },
-    );
+    let pr = async move {
+        let github = Github::new("SirVer_giti/unspecified", Some(Credentials::Token(token)))
+            .expect("GitHub could not be constructed");
+        let (_, pr) = fetch_pr(github, pr_id_clone)
+            .await
+            .expect("fetch_pr did not complete.");
+        pr
+    }
+    .await;
 
-    let pr = rx.recv().unwrap();
     Ok(PullRequest {
         source: Branch::from_label(&pr_id.repo.name, &pr.head.label),
         target: Branch::from_label(&pr_id.repo.name, &pr.base.label),

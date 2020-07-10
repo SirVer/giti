@@ -52,6 +52,6 @@ impl fmt::Display for Error {
 
 impl<T: error::Error> From<T> for Error {
     fn from(err: T) -> Error {
-        Error::general(err.description().to_string())
+        Error::general(err.to_string().to_string())
     }
 }

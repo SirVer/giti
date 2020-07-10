@@ -84,8 +84,12 @@ impl Remote {
     }
 
     fn owner_and_project(&self) -> &str {
-        const GITHUB_HTTPS: &str =  "https://github.com/";
-        self.url.trim_start_matches(GITHUB_HTTPS).rsplitn(2, ':').nth(0).unwrap()
+        const GITHUB_HTTPS: &str = "https://github.com/";
+        self.url
+            .trim_start_matches(GITHUB_HTTPS)
+            .rsplitn(2, ':')
+            .nth(0)
+            .unwrap()
     }
 
     pub fn owner(&self) -> &str {
@@ -181,7 +185,7 @@ fn get_origin(local_branch: &str) -> Option<OriginBranch> {
         Ok(out) => str::from_utf8(&out.stdout)
             .unwrap()
             .trim()
-            .trim_left_matches("refs/heads/")
+            .trim_start_matches("refs/heads/")
             .to_string(),
         Err(_) => return None,
     };
@@ -251,11 +255,8 @@ fn run_buildifier(path: &Path) -> Result<()> {
 
 fn run_rustfmt(path: &Path) -> Result<()> {
     dispatch_to(
-        "rustup",
+        "rustfmt",
         &[
-            "run",
-            "nightly",
-            "rustfmt",
             "--write-mode",
             "overwrite",
             &path.to_string_lossy(),
@@ -305,7 +306,7 @@ pub fn handle_fix(args: &[&str], repo: &git2::Repository) -> Result<()> {
     Ok(())
 }
 
-pub fn handle_cleanup(repo: &git2::Repository, dbase: &mut diffbase::Diffbase) -> Result<()> {
+pub async fn handle_cleanup(repo: &git2::Repository, dbase: &mut diffbase::Diffbase) -> Result<()> {
     let current_branch = get_current_branch(repo);
 
     for branch in get_all_local_branch_names(repo)? {
@@ -319,7 +320,7 @@ pub fn handle_cleanup(repo: &git2::Repository, dbase: &mut diffbase::Diffbase) -
         }
 
         if let Some(pr_id) = dbase.get_github_pr(&branch) {
-            let pr = github::get_pr(&pr_id)?;
+            let pr = github::get_pr(&pr_id).await?;
             if pr.state == github::PullRequestState::Closed {
                 let rev = repo.revparse_single(&branch)?;
                 println!(
@@ -357,7 +358,7 @@ pub fn handle_review_push(repo: &git2::Repository) -> Result<()> {
     Ok(())
 }
 
-pub fn handle_review(
+pub async fn handle_review(
     args: &[&str],
     repo: &git2::Repository,
     dbase: &mut diffbase::Diffbase,
@@ -369,7 +370,7 @@ pub fn handle_review(
     let repo_id = master_remote.repository();
 
     if args.len() == 1 {
-        let prs = github::find_assigned_prs(Some(&repo_id))?;
+        let prs = github::find_assigned_prs(Some(&repo_id)).await?;
         if prs.is_empty() {
             println!("No reviews assigned in {}/{}.", repo_id.owner, repo_id.name);
         } else {
@@ -399,7 +400,8 @@ pub fn handle_review(
         let pr = github::get_pr(&github::PullRequestId {
             repo: repo_id.clone(),
             number: pr_number,
-        })?;
+        })
+        .await?;
         let pr_id = pr.id();
         (pr.source, Some(pr_id))
     } else {
@@ -458,14 +460,14 @@ pub fn checkout(repo: &git2::Repository, branch: &str) -> Result<()> {
     Ok(())
 }
 
-pub fn handle_open_reviews(args: &[&str]) -> Result<()> {
+pub async fn handle_open_reviews(args: &[&str]) -> Result<()> {
     if args.len() != 2 {
         return Err(Error::general(
             "open_reviews requires a base url as first argument.".into(),
         ));
     }
 
-    let prs = github::find_assigned_prs(None)?;
+    let prs = github::find_assigned_prs(None).await?;
     for pr in prs {
         // Ignore the result.
         let _ = webbrowser::open(&format!(
@@ -489,7 +491,7 @@ pub fn handle_clone(args: &[&str]) -> Result<()> {
                 a.to_string()
             }
         })
-        .collect();;
+        .collect();
 
     let args_ref: Vec<_> = new_args.iter().map(|s| s as &str).collect();
     dispatch_to("git", &args_ref)?;
@@ -497,7 +499,7 @@ pub fn handle_clone(args: &[&str]) -> Result<()> {
     Ok(())
 }
 
-pub fn handle_prs(args: &[&str]) -> Result<()> {
+pub async fn handle_prs(args: &[&str]) -> Result<()> {
     let mut opts = getopts::Options::new();
     opts.optopt(
         "s",
@@ -544,7 +546,7 @@ pub fn handle_prs(args: &[&str]) -> Result<()> {
         end.format("%Y-%m-%d")
     );
 
-    let prs = github::find_my_prs(start, end)?;
+    let prs = github::find_my_prs(start, end).await?;
 
     let (mut open, mut closed) = prs
         .into_iter()
@@ -565,7 +567,7 @@ pub fn handle_prs(args: &[&str]) -> Result<()> {
     Ok(())
 }
 
-pub fn handle_pr(
+pub async fn handle_pr(
     _args: &[&str],
     repo: &git2::Repository,
     dbase: &mut diffbase::Diffbase,
@@ -640,7 +642,7 @@ pub fn handle_pr(
         base,
     };
 
-    let pr = github::create_pr(&repo_id, pull_options)?.id();
+    let pr = github::create_pr(&repo_id, pull_options).await?.id();
     dbase.set_github_pr(&current_branch, pr.clone());
 
     println!("Opened {}. Opening in web browser.", pr.url());
@@ -665,7 +667,7 @@ fn replace_aliases<'a>(command: &'a str, git_aliases: &'a HashMap<String, String
     vec![command]
 }
 
-pub fn handle_repository(original_args: &[&str]) -> Result<()> {
+pub async fn handle_repository(original_args: &[&str]) -> Result<()> {
     if original_args.is_empty() {
         return dispatch_to("git", original_args);
     }
@@ -681,9 +683,9 @@ pub fn handle_repository(original_args: &[&str]) -> Result<()> {
     // Arguments that are valid without a git repository.
     match expanded_args[0] as &str {
         // Intercepted commands.
-        "open_reviews" => return handle_open_reviews(&expanded_args),
+        "open_reviews" => return handle_open_reviews(&expanded_args).await,
         "clone" => return handle_clone(&expanded_args),
-        "prs" => return handle_prs(&expanded_args),
+        "prs" => return handle_prs(&expanded_args).await,
         _ => (),
     };
 
@@ -698,15 +700,15 @@ pub fn handle_repository(original_args: &[&str]) -> Result<()> {
         // Intercepted commands.
         "branch" => diffbase::handle_branch(&expanded_args, &repo, &mut dbase),
         "checkout" => diffbase::handle_checkout(&expanded_args, &repo, &mut dbase),
-        "cleanup" => handle_cleanup(&repo, &mut dbase),
+        "cleanup" => handle_cleanup(&repo, &mut dbase).await,
         "down" => diffbase::handle_down(&expanded_args, &repo, &mut dbase),
         "fix" => handle_fix(&expanded_args, &repo),
         "merge" => diffbase::handle_merge(&expanded_args, &repo, &mut dbase),
         "pullc" => diffbase::handle_pullc(&expanded_args, &repo, &mut dbase),
-        "review" => handle_review(&expanded_args, &repo, &mut dbase),
+        "review" => handle_review(&expanded_args, &repo, &mut dbase).await,
         "start" => handle_start(&expanded_args, &repo),
         "up" => diffbase::handle_up(&expanded_args, &repo, &mut dbase),
-        "pr" => handle_pr(&expanded_args, &repo, &mut dbase),
+        "pr" => handle_pr(&expanded_args, &repo, &mut dbase).await,
 
         _ => dispatch_to("git", &expanded_args),
     };

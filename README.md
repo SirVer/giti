@@ -27,7 +27,7 @@ to `origin/master` and run auto-formatting tool on them. You need to install
 them separately and have them on your `$PATH`:
 
 - **clang-format:** For c++ files and protobuf. Install with `brew install clang-format`.
-- **rustfmt:** For rust files. Install with `rustup run nightly cargo install --force rustfmt-nightly`.
+- **rustfmt:** For rust files. Install with `rustup run cargo install --force rustfmt`.
 - **buildifier:** For bazel BUILD files. Install go, make sure `$GOPATH/bin` is
   in your `$PATH`, then
 

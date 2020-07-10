@@ -1,5 +1,3 @@
-#![feature(await_macro, async_await, futures_api)]
-
 pub mod diffbase;
 pub mod dispatch;
 pub mod error;

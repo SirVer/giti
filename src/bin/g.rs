@@ -20,7 +20,8 @@ fn update() -> Result<(), Box<dyn (::std::error::Error)>> {
     Ok(())
 }
 
-fn main() {
+#[tokio::main(basic_scheduler)]
+async fn main() {
     let args_owned: Vec<String> = env::args().collect();
     let args: Vec<&str> = args_owned.iter().map(|s| s as &str).collect();
 
@@ -28,7 +29,7 @@ fn main() {
         update().unwrap();
         return;
     }
-    let result = git::handle_repository(&args[1..]);
+    let result = git::handle_repository(&args[1..]).await;
 
     let exit_code = match result {
         Err(error) => {
