@@ -335,7 +335,6 @@ pub fn handle_pullc(args: &[&str], repo: &git2::Repository, diffbase: &Diffbase)
     if has_upstream(root) {
         run_command(&["git", "pull"])?;
     }
-    git::merge("origin/master", repo)?;
     if do_push && has_upstream(root) {
         run_command(&["git", "push"])?;
     }
