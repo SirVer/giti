@@ -86,7 +86,8 @@ impl Diffbase {
     }
 
     fn set_diffbase_quiet(&mut self, branch: &str, diffbase: &str) -> Result<()> {
-        if diffbase == "master" {
+        let main_branch = git::get_main_branch();
+        if diffbase == main_branch {
             return Err(Error::branch_cant_be_diffbase(diffbase));
         }
         if !self.entries.contains_key(branch) {
@@ -320,7 +321,7 @@ pub fn handle_pullc(args: &[&str], repo: &git2::Repository, diffbase: &Diffbase)
     let branch_at_start = git::get_current_branch(repo);
     let root = diffbase.get_root(&branch_at_start).unwrap();
 
-    // Merge master into the root.
+    // Merge main into the root.
     run_command(&["git", "fetch"])?;
 
     let has_upstream = |s| {

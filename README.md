@@ -23,7 +23,7 @@ This is due to differences where SSL certs are saved in Debian and Ubuntu.
 # Running fix commands
 
 When running `g fix`, the tool will figure out which files have changed compared
-to `origin/master` and run auto-formatting tool on them. You need to install
+to `origin/master` or `origin/main` and run auto-formatting tool on them. You need to install
 them separately and have them on your `$PATH`:
 
 - **clang-format:** For c++ files and protobuf. Install with `brew install clang-format`.

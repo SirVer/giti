@@ -22,6 +22,16 @@ pub fn merge(branch: &str, repo: &git2::Repository) -> Result<()> {
     Ok(())
 }
 
+pub fn get_main_branch() -> String {
+    let out = String::from_utf8(communicate(&["git", "remote", "show", "origin"]).unwrap().stdout).unwrap();
+    for line in out.lines() {
+        if line.trim().starts_with("HEAD branch: ") {
+            return line.trim().split_whitespace().last().unwrap().to_string()
+        }
+    }
+    panic!("No HEAD branch for remote 'origin'");
+}
+
 /// Parses git's configuration and extracts all aliases that do not shell out. Returns (key, value)
 /// representations.
 pub fn get_aliases() -> HashMap<String, String> {
@@ -268,14 +278,15 @@ fn run_rustfmt(path: &Path) -> Result<()> {
 pub fn handle_fix(args: &[&str], repo: &git2::Repository) -> Result<()> {
     expect_working_directory_clean()?;
 
+    let main_branch = get_main_branch();
     let other_branch = if args.len() == 2 {
-        &args[1]
+        args[1].to_string()
     } else {
-        "origin/master"
+        format!("origin/{}", main_branch)
     };
 
     println!("Fixing modified files compared to {}", other_branch);
-    let (added, _, modified) = get_changed_files(repo, other_branch, &get_current_branch(repo))?;
+    let (added, _, modified) = get_changed_files(repo, &other_branch, &get_current_branch(repo))?;
 
     let workdir = repo.workdir().unwrap();
     for path in added.union(&modified) {
@@ -365,9 +376,10 @@ pub async fn handle_review(
 ) -> Result<()> {
     let remotes = get_remotes()?;
 
-    let master_origin = get_origin("master").unwrap();
-    let master_remote = &remotes[&master_origin.remote];
-    let repo_id = master_remote.repository();
+    let main_branch = get_main_branch();
+    let main_origin = get_origin(&main_branch).unwrap();
+    let main_remote = &remotes[&main_origin.remote];
+    let repo_id = main_remote.repository();
 
     if args.len() == 1 {
         let prs = github::find_assigned_prs(Some(&repo_id)).await?;
@@ -432,7 +444,7 @@ pub async fn handle_review(
             "remote",
             "add",
             owner,
-            &format!("git@github.com:{}/{}", owner, master_remote.project()),
+            &format!("git@github.com:{}/{}", owner, main_remote.project()),
         ])?;
     }
     // Since the local_branch name is the remote/branch git also resolves it to the correct remote.
@@ -574,8 +586,9 @@ pub async fn handle_pr(
 ) -> Result<()> {
     let remotes = get_remotes()?;
 
-    let master_origin = get_origin("master").unwrap();
-    let base_remote = &remotes[&master_origin.remote];
+    let main_branch = get_main_branch();
+    let main_origin = get_origin(&main_branch).unwrap();
+    let base_remote = &remotes[&main_origin.remote];
     let repo_id = base_remote.repository();
 
     let local_branches = get_all_local_branches(&repo)?;
@@ -626,7 +639,7 @@ pub async fn handle_pr(
     };
 
     // Target to merge into.
-    let base = "master".to_string();
+    let base = "main".to_string();
 
     // Base to merge from. If it is in the same fork as base, it must not contain the owners name.
     let head = if head_remote == base_remote {
@@ -656,7 +669,8 @@ pub fn handle_start(args: &[&str], repo: &git2::Repository) -> Result<()> {
         return Err(Error::general("start requires a branch name.".into()));
     }
     let _ = run_command(&["git", "fetch"])?;
-    run_command(&["git", "branch", "--no-track", args[1], "origin/master"])?;
+    let origin = format!("origin/{}", get_main_branch());
+    run_command(&["git", "branch", "--no-track", args[1], &origin])?;
     checkout(repo, &args[1])
 }
 
