@@ -23,11 +23,9 @@ pub fn merge(branch: &str, repo: &git2::Repository) -> Result<()> {
 }
 
 pub fn get_main_branch() -> String {
-    let out = String::from_utf8(communicate(&["git", "remote", "show", "origin"]).unwrap().stdout).unwrap();
+    let out = String::from_utf8(communicate(&["git", "symbolic-ref", "refs/remotes/origin/HEAD"]).unwrap().stdout).unwrap();
     for line in out.lines() {
-        if line.trim().starts_with("HEAD branch: ") {
-            return line.trim().split_whitespace().last().unwrap().to_string()
-        }
+        return line.trim().split('/').last().unwrap().to_string()
     }
     panic!("No HEAD branch for remote 'origin'");
 }
