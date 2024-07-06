@@ -1,3 +1,6 @@
+// TODO(hrapp): Upgrade chrono to get rid of this.
+#![allow(deprecated)]
+
 use crate::error::*;
 use chrono::{Date, Local};
 use hubcaps::search::SearchIssuesOptions;

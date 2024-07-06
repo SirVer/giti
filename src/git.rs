@@ -1,14 +1,18 @@
+// TODO(hrapp): Upgrade chrono to get rid of this.
+#![allow(deprecated)]
+
 use crate::diffbase;
 use crate::dispatch::{communicate, dispatch_to, run_command, run_editor};
-use crate::github;
 use crate::Error;
 use crate::Result;
+use crate::{github, gitlab};
 use chrono::{Local, NaiveDate, TimeZone};
 use git2;
 use std::collections::{HashMap, HashSet};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::str;
+use tokio::try_join;
 use webbrowser;
 
 /// Calls git merge and checks if the merge was successful.
@@ -23,9 +27,14 @@ pub fn merge(branch: &str, repo: &git2::Repository) -> Result<()> {
 }
 
 pub fn get_main_branch() -> String {
-    let out = String::from_utf8(communicate(&["git", "symbolic-ref", "refs/remotes/origin/HEAD"]).unwrap().stdout).unwrap();
+    let out = String::from_utf8(
+        communicate(&["git", "symbolic-ref", "refs/remotes/origin/HEAD"])
+            .unwrap()
+            .stdout,
+    )
+    .unwrap();
     for line in out.lines() {
-        return line.trim().split('/').last().unwrap().to_string()
+        return line.trim().split('/').last().unwrap().to_string();
     }
     panic!("No HEAD branch for remote 'origin'");
 }
@@ -264,11 +273,7 @@ fn run_buildifier(path: &Path) -> Result<()> {
 fn run_rustfmt(path: &Path) -> Result<()> {
     dispatch_to(
         "rustfmt",
-        &[
-            "--write-mode",
-            "overwrite",
-            &path.to_string_lossy(),
-        ],
+        &["--write-mode", "overwrite", &path.to_string_lossy()],
     )?;
     Ok(())
 }
@@ -551,27 +556,41 @@ pub async fn handle_prs(args: &[&str]) -> Result<()> {
     };
 
     println!(
-        "Finding prs from {} to {}.",
+        "Finding GitHub PRs and GitLab MRs from {} to {}.",
         start.format("%Y-%m-%d"),
         end.format("%Y-%m-%d")
     );
 
-    let prs = github::find_my_prs(start, end).await?;
+    let (mrs, prs) = try_join!(
+        gitlab::find_my_mrs(start, end),
+        github::find_my_prs(start, end)
+    )?;
 
-    let (mut open, mut closed) = prs
+    let (mut open_github, mut closed_github) = prs
         .into_iter()
         .partition::<Vec<_>, _>(|pr| pr.state == github::PullRequestState::Open);
-    open.sort_by_key(|p| (p.target.repo.name.clone(), p.number));
-    closed.sort_by_key(|p| (p.target.repo.name.clone(), p.number));
+    open_github.sort_by_key(|p| (p.target.repo.name.clone(), p.number));
+    closed_github.sort_by_key(|p| (p.target.repo.name.clone(), p.number));
+    let (mut open_gitlab, mut closed_gitlab) = mrs
+        .into_iter()
+        .partition::<Vec<_>, _>(|pr| pr.state == gitlab::PullRequestState::Open);
+    open_gitlab.sort_by_key(|p| p.web_url.clone());
+    closed_gitlab.sort_by_key(|p| p.web_url.clone());
 
     println!("Closed:");
-    for p in closed {
+    for p in closed_github {
         println!("  - [#{} • {}]({})", p.number, p.title, p.id().url());
+    }
+    for p in closed_gitlab {
+        println!("  - [#{} • {}]({})", p.number, p.title, p.web_url);
     }
 
     println!("\nStill open:");
-    for p in open {
+    for p in open_github {
         println!("  - [#{} • {}]({})", p.number, p.title, p.id().url());
+    }
+    for p in open_gitlab {
+        println!("  - [#{} • {}]({})", p.number, p.title, p.web_url);
     }
 
     Ok(())
