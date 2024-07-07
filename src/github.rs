@@ -1,16 +1,13 @@
-// TODO(hrapp): Upgrade chrono to get rid of this.
-#![allow(deprecated)]
-
 use crate::error::*;
-use chrono::{Date, Local};
-use hubcaps::search::SearchIssuesOptions;
-use hubcaps::{self, Credentials};
+use chrono::{DateTime, Local};
+use futures::StreamExt;
+use hubcaps_ex::search::SearchIssuesOptions;
+use hubcaps_ex::{self, Credentials};
 use serde::{Deserialize, Serialize};
 use std::env;
 use std::fmt::Display;
 use std::path::Path;
 use std::str::FromStr;
-use tokio::stream::StreamExt;
 use url;
 
 // TODO(sirver): This state of async/await only allowed static references or owning data. So there
@@ -106,7 +103,7 @@ pub struct RepoId {
     pub name: String,
 }
 
-type Github = hubcaps::Github;
+type Github = hubcaps_ex::Github;
 
 // bug fixed version from hubcaps: http://lessis.me/hubcaps/src/hubcaps/search/mod.rs.html#229-235
 pub fn repo_tuple(repository_url: &str) -> (String, String) {
@@ -120,7 +117,7 @@ pub fn repo_tuple(repository_url: &str) -> (String, String) {
 async fn fetch_pr(
     github: Github,
     pr_id: PullRequestId,
-) -> hubcaps::Result<(RepoId, hubcaps::pulls::Pull)> {
+) -> hubcaps_ex::Result<(RepoId, hubcaps_ex::pulls::Pull)> {
     let res = github
         .repo(pr_id.repo.owner.to_string(), pr_id.repo.name.to_string())
         .pulls()
@@ -133,7 +130,7 @@ async fn fetch_pr(
 async fn search_prs(
     github: Github,
     query: String,
-) -> hubcaps::Result<Vec<(RepoId, hubcaps::pulls::Pull)>> {
+) -> hubcaps_ex::Result<Vec<(RepoId, hubcaps_ex::pulls::Pull)>> {
     let mut search = github
         .search()
         .issues()
@@ -156,20 +153,20 @@ async fn search_prs(
     Ok(results)
 }
 
-async fn find_login_name(github: Github) -> hubcaps::Result<String> {
+async fn find_login_name(github: Github) -> hubcaps_ex::Result<String> {
     Ok(github.users().authenticated().await?.login)
 }
 
 async fn run_find_assigned_prs(
     github: Github,
-) -> hubcaps::Result<Vec<(RepoId, hubcaps::pulls::Pull)>> {
+) -> hubcaps_ex::Result<Vec<(RepoId, hubcaps_ex::pulls::Pull)>> {
     let login = find_login_name(github.clone()).await?;
     let query = format!("is:pr is:open archived:false assignee:{}", login);
     let res = search_prs(github.clone(), query).await?;
     Ok(res)
 }
 
-fn search_result_to_pull_requests(prs: Vec<(RepoId, hubcaps::pulls::Pull)>) -> Vec<PullRequest> {
+fn search_result_to_pull_requests(prs: Vec<(RepoId, hubcaps_ex::pulls::Pull)>) -> Vec<PullRequest> {
     prs.iter()
         .map(|(pr_repo, pr)| PullRequest {
             source: Branch::from_label(&pr_repo.name, &pr.head.label),
@@ -208,10 +205,7 @@ pub async fn find_assigned_prs(repo: Option<&RepoId>) -> Result<Vec<PullRequest>
     .await
 }
 
-pub async fn find_my_prs(
-    start_date: Date<Local>,
-    end_date: Date<Local>,
-) -> Result<Vec<PullRequest>> {
+pub async fn find_my_prs(start: DateTime<Local>, end: DateTime<Local>) -> Result<Vec<PullRequest>> {
     let token = env::var("GITHUB_TOKEN")?;
 
     async move {
@@ -224,8 +218,8 @@ pub async fn find_my_prs(
         let query = format!(
             "is:pr author:{} created:{}..{}",
             login,
-            start_date.format("%Y-%m-%d"),
-            end_date.format("%Y-%m-%d")
+            start.format("%Y-%m-%d"),
+            end.format("%Y-%m-%d")
         );
         let prs = search_prs(github.clone(), query)
             .await
@@ -240,7 +234,7 @@ pub async fn find_my_prs(
 
 pub async fn create_pr(
     repo: &RepoId,
-    pull_options: hubcaps::pulls::PullOptions,
+    pull_options: hubcaps_ex::pulls::PullOptions,
 ) -> Result<PullRequest> {
     let token = env::var("GITHUB_TOKEN")?;
 

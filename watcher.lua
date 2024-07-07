@@ -11,10 +11,10 @@ return {
        PKG_CONFIG_PATH="/usr/local/opt/openssl/lib/pkgconfig",
     },
     commands = {
-      -- {
-        -- name = "Cargo check",
-        -- command = "cargo check --color=always",
-      -- },
+      {
+        name = "Cargo check",
+        command = "cargo check --color=always",
+      },
       {
         name = "Cargo build [debug]",
         command = "cargo build --color=always",

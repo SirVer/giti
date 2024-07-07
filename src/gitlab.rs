@@ -1,8 +1,5 @@
-// TODO(hrapp): Upgrade chrono to get rid of this.
-#![allow(deprecated)]
-
 use crate::error::*;
-use chrono::{Date, Local};
+use chrono::{DateTime, Local};
 use serde::Deserialize;
 use std::env;
 
@@ -25,8 +22,10 @@ pub struct MergeRequest {
     #[serde(rename = "iid")]
     pub number: usize,
     pub state: PullRequestState,
-    pub source_branch: String,
-    pub target_branch: String,
+    #[serde(rename = "source_branch")]
+    pub _source_branch: String,
+    #[serde(rename = "target_branch")]
+    pub _target_branch: String,
     pub web_url: String,
 }
 
@@ -70,18 +69,12 @@ impl GitLab {
 // I tried the GitLab crate, but it was very limiting, so gobbling together my own little Rest
 // abstraction was actually the easiest thing to do.
 pub async fn find_my_mrs(
-    start_date: Date<Local>,
-    end_date: Date<Local>,
+    start_date: DateTime<Local>,
+    end_date: DateTime<Local>,
 ) -> Result<Vec<MergeRequest>> {
     let gl = GitLab::new()?;
-    let start = start_date
-        .and_hms(0, 0, 0)
-        .format("%Y-%m-%dT%H:%M:%SZ")
-        .to_string();
-    let end = end_date
-        .and_hms(23, 59, 59)
-        .format("%Y-%m-%dT%H:%M:%SZ")
-        .to_string();
+    let start = start_date.format("%Y-%m-%dT%H:%M:%SZ").to_string();
+    let end = end_date.format("%Y-%m-%dT%H:%M:%SZ").to_string();
 
     let user = gl.find_user_name().await?;
     let mrs = gl

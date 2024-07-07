@@ -1,6 +1,3 @@
-// TODO(hrapp): Upgrade chrono to get rid of this.
-#![allow(deprecated)]
-
 use crate::diffbase;
 use crate::dispatch::{communicate, dispatch_to, run_command, run_editor};
 use crate::Error;
@@ -44,8 +41,8 @@ pub fn get_main_branch() -> String {
 pub fn get_aliases() -> HashMap<String, String> {
     let mut rv = HashMap::new();
     let config = git2::Config::open_default().unwrap();
-    let entries = config.entries(Some("alias.*")).unwrap();
-    for entry_or_err in &entries {
+    let mut entries = config.entries(Some("alias.*")).unwrap();
+    while let Some(entry_or_err) = entries.next() {
         let entry = entry_or_err.unwrap();
         // We only need to understand aliases for git commands (like checkout, branch) and so on.
         // We will never care for stuff that shells out.
@@ -189,7 +186,7 @@ pub fn get_current_branch(repo: &git2::Repository) -> String {
 #[derive(Debug)]
 struct OriginBranch {
     remote: String,
-    branch: String,
+    _branch: String,
 }
 
 fn get_origin(local_branch: &str) -> Option<OriginBranch> {
@@ -198,7 +195,7 @@ fn get_origin(local_branch: &str) -> Option<OriginBranch> {
         Err(_) => return None,
     };
 
-    let branch = match communicate(&["git", "config", &format!("branch.{}.merge", local_branch)]) {
+    let _branch = match communicate(&["git", "config", &format!("branch.{}.merge", local_branch)]) {
         Ok(out) => str::from_utf8(&out.stdout)
             .unwrap()
             .trim()
@@ -207,7 +204,7 @@ fn get_origin(local_branch: &str) -> Option<OriginBranch> {
         Err(_) => return None,
     };
 
-    Some(OriginBranch { remote, branch })
+    Some(OriginBranch { remote, _branch })
 }
 
 /// Returns the (added, deleted, modified) files between two treeishs, e.g. branch names.
@@ -537,20 +534,28 @@ pub async fn handle_prs(args: &[&str]) -> Result<()> {
         }
     };
 
-    let today = Local::today();
+    let today = Local::now();
     let start = match matches.opt_str("start_date") {
         None => today
             .checked_sub_signed(chrono::Duration::days(21))
             .expect("This should not underflow."),
         Some(s) => Local
-            .from_local_date(&NaiveDate::parse_from_str(&s, "%Y-%m-%d")?)
+            .from_local_datetime(
+                &NaiveDate::parse_from_str(&s, "%Y-%m-%d")?
+                    .and_hms_opt(0, 0, 0)
+                    .unwrap(),
+            )
             .single()
             .unwrap(),
     };
     let end = match matches.opt_str("end_date") {
         None => today,
         Some(s) => Local
-            .from_local_date(&NaiveDate::parse_from_str(&s, "%Y-%m-%d")?)
+            .from_local_datetime(
+                &NaiveDate::parse_from_str(&s, "%Y-%m-%d")?
+                    .and_hms_opt(23, 59, 59)
+                    .unwrap(),
+            )
             .single()
             .unwrap(),
     };
@@ -665,7 +670,7 @@ pub async fn handle_pr(
         format!("{}:{}", head_remote.owner(), current_branch)
     };
 
-    let pull_options = hubcaps::pulls::PullOptions {
+    let pull_options = hubcaps_ex::pulls::PullOptions {
         title,
         body,
         head,

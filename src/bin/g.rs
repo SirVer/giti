@@ -20,7 +20,7 @@ fn update() -> Result<(), Box<dyn (::std::error::Error)>> {
     Ok(())
 }
 
-#[tokio::main(basic_scheduler)]
+#[tokio::main]
 async fn main() {
     let args_owned: Vec<String> = env::args().collect();
     let args: Vec<&str> = args_owned.iter().map(|s| s as &str).collect();
