@@ -9,7 +9,7 @@ fn update() -> Result<(), Box<dyn (::std::error::Error)>> {
     self_update::backends::github::Update::configure()
         .repo_owner("SirVer")
         .repo_name("giti")
-        .target(&target)
+        .target(target)
         .bin_name("g")
         .show_download_progress(true)
         .show_output(false)

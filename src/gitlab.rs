@@ -50,7 +50,7 @@ impl GitLab {
 
     fn get(&self, endpoint: &str) -> reqwest::RequestBuilder {
         self.client
-            .get(&format!("{GITLAB_BASE_URL}/{endpoint}"))
+            .get(format!("{GITLAB_BASE_URL}/{endpoint}"))
             .header("PRIVATE-TOKEN", &self.token)
     }
 

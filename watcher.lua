@@ -23,6 +23,10 @@ return {
         -- name = "Cargo build [release]",
         -- command = "cargo build --release --color=always",
       -- },
+      {
+        name = "Cargo clippy [debug]",
+        command = "cargo clippy --color=always",
+      },
     },
     should_run = is_rust,
     redirect_stderr = "/tmp/cargo.err",

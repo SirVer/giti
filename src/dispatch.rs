@@ -7,13 +7,13 @@ use term;
 
 #[derive(Clone, Copy)]
 enum PrintCommands {
-    YES,
-    NO,
+    Yes,
+    No,
 }
 
 pub fn run_editor(path: &Path) -> Result<()> {
     let editor = default_editor::get()?;
-    let mut it = editor.split(" ");
+    let mut it = editor.split(' ');
     let cmd = it.next().unwrap();
     let mut args: Vec<String> = it.map(|s| s.to_string()).collect();
     args.push(path.to_str().unwrap().to_string());
@@ -23,30 +23,30 @@ pub fn run_editor(path: &Path) -> Result<()> {
 
 /// Dispatches to 'command' without echoing.
 pub fn dispatch_to(command: &str, args: &[&str]) -> Result<()> {
-    shell_out(command, args, PrintCommands::NO)
+    shell_out(command, args, PrintCommands::No)
 }
 
 /// Runs the command and echoing the command line.
 pub fn run_command(args: &[&str]) -> Result<()> {
-    shell_out(args[0], &args[1..], PrintCommands::YES)
+    shell_out(args[0], &args[1..], PrintCommands::Yes)
 }
 
 /// Runs the command, but captures stdout & stdin. Named after the python function.
 pub fn communicate(args: &[&str]) -> Result<process::Output> {
-    Ok(process::Command::new(&args[0]).args(&args[1..]).output()?)
+    Ok(process::Command::new(args[0]).args(&args[1..]).output()?)
 }
 
 /// Dispatches to 'program' with 'str'. 'print' decides if the command lines are echoed.
 fn shell_out(program: &str, args: &[&str], print: PrintCommands) -> Result<()> {
     match print {
-        PrintCommands::YES => {
+        PrintCommands::Yes => {
             let mut terminal = term::stdout().unwrap();
             terminal.fg(term::color::CYAN).unwrap();
             write!(terminal, "=> Running: {} {}", program, args.join(" ")).unwrap();
             terminal.reset().unwrap();
-            writeln!(terminal, "").unwrap();
+            writeln!(terminal).unwrap();
         }
-        PrintCommands::NO => {}
+        PrintCommands::No => {}
     }
 
     let mut child = process::Command::new(program)
@@ -67,11 +67,11 @@ fn shell_out(program: &str, args: &[&str], print: PrintCommands) -> Result<()> {
     };
 
     match print {
-        PrintCommands::YES => {
+        PrintCommands::Yes => {
             // An empty line to separate the different commands.
             println!()
         }
-        PrintCommands::NO => (),
+        PrintCommands::No => (),
     }
     result
 }

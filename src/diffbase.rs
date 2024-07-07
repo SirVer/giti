@@ -169,9 +169,8 @@ impl Diffbase {
     /// Returns the ancestor of 'branch' that has no diffbase. Might be the branch itself. Returns
     /// None if 'branch' is not a valid branch name.
     pub fn get_root<'a>(&'a self, branch: &'a str) -> Option<&'a str> {
-        if self.entries.get(branch).is_none() {
-            return None;
-        };
+        // Make sure branch is known to us.
+        self.entries.get(branch)?;
 
         let mut branch = branch;
         loop {
@@ -295,7 +294,7 @@ pub fn handle_down(_: &[&str], repo: &git2::Repository, diffbase: &Diffbase) -> 
             "{} has no unique branch that has it as diffbase. \
              Contenders are {}.",
             current_branch,
-            children.iter().map(|s| *s).collect::<Vec<_>>().join(", ")
+            children.to_vec().join(", ")
         ))),
         None => panic!("branch not in diffbase list."),
     }

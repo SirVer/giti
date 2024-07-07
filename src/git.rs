@@ -30,10 +30,11 @@ pub fn get_main_branch() -> String {
             .stdout,
     )
     .unwrap();
-    for line in out.lines() {
-        return line.trim().split('/').last().unwrap().to_string();
-    }
-    panic!("No HEAD branch for remote 'origin'");
+    let line = out
+        .lines()
+        .next()
+        .expect("No HEAD branch for remote 'origin'");
+    line.trim().split('/').last().unwrap().to_string()
 }
 
 /// Parses git's configuration and extracts all aliases that do not shell out. Returns (key, value)
@@ -94,24 +95,24 @@ impl Remote {
     /// The project part of the URL, i.e. for git@github.com:SirVer/giti.git, this would be
     /// 'giti.git'.
     pub fn project(&self) -> &str {
-        self.url.rsplitn(2, '/').nth(0).unwrap()
+        self.url.rsplit('/').nth(0).unwrap()
     }
 
     fn owner_and_project(&self) -> &str {
         const GITHUB_HTTPS: &str = "https://github.com/";
         self.url
             .trim_start_matches(GITHUB_HTTPS)
-            .rsplitn(2, ':')
+            .rsplit(':')
             .nth(0)
             .unwrap()
     }
 
     pub fn owner(&self) -> &str {
-        self.owner_and_project().rsplitn(2, '/').nth(1).unwrap()
+        self.owner_and_project().rsplit_once('/').unwrap().0
     }
 
     pub fn repository(&self) -> github::RepoId {
-        let mut name = self.owner_and_project().rsplitn(2, '/').nth(0).unwrap();
+        let mut name = self.owner_and_project().rsplit('/').nth(0).unwrap();
         if name.ends_with(".git") {
             name = &name[..name.len() - 4];
         }
@@ -331,7 +332,7 @@ pub async fn handle_cleanup(repo: &git2::Repository, dbase: &mut diffbase::Diffb
         }
 
         if let Some(pr_id) = dbase.get_github_pr(&branch) {
-            let pr = github::get_pr(&pr_id).await?;
+            let pr = github::get_pr(pr_id).await?;
             if pr.state == github::PullRequestState::Closed {
                 let rev = repo.revparse_single(&branch)?;
                 println!(
@@ -497,7 +498,7 @@ pub fn handle_clone(args: &[&str]) -> Result<()> {
     let new_args: Vec<_> = args
         .iter()
         .map(|a| {
-            if github_repo_regex.is_match(&a) {
+            if github_repo_regex.is_match(a) {
                 format!("git@github.com:{}.git", a)
             } else {
                 a.to_string()
@@ -613,8 +614,8 @@ pub async fn handle_pr(
     let base_remote = &remotes[&main_origin.remote];
     let repo_id = base_remote.repository();
 
-    let local_branches = get_all_local_branches(&repo)?;
-    let current_branch = get_current_branch(&repo);
+    let local_branches = get_all_local_branches(repo)?;
+    let current_branch = get_current_branch(repo);
     if local_branches[&current_branch].upstream.is_none() {
         return Err(Error::general(
             "current branch has no upstream (maybe git push -u?). \
@@ -642,7 +643,7 @@ pub async fn handle_pr(
         .rand_bytes(0)
         .tempfile()?;
 
-    if let Some(msg) = github::get_pull_request_template(&repo.workdir().unwrap()) {
+    if let Some(msg) = github::get_pull_request_template(repo.workdir().unwrap()) {
         temp_file.write_all(msg.as_bytes())?
     }
     let temp_path = temp_file.into_temp_path();
@@ -690,10 +691,10 @@ pub fn handle_start(args: &[&str], repo: &git2::Repository) -> Result<()> {
     if args.len() != 2 {
         return Err(Error::general("start requires a branch name.".into()));
     }
-    let _ = run_command(&["git", "fetch"])?;
+    run_command(&["git", "fetch"])?;
     let origin = format!("origin/{}", get_main_branch());
     run_command(&["git", "branch", "--no-track", args[1], &origin])?;
-    checkout(repo, &args[1])
+    checkout(repo, args[1])
 }
 
 fn replace_aliases<'a>(command: &'a str, git_aliases: &'a HashMap<String, String>) -> Vec<&'a str> {
@@ -713,7 +714,7 @@ pub async fn handle_repository(original_args: &[&str]) -> Result<()> {
     let expanded_args: Vec<&str> = alias_expanded
         .iter()
         .chain(original_args[1..].iter())
-        .map(|r| *r)
+        .copied()
         .collect();
 
     // Arguments that are valid without a git repository.
@@ -737,13 +738,13 @@ pub async fn handle_repository(original_args: &[&str]) -> Result<()> {
         "branch" => diffbase::handle_branch(&expanded_args, &repo, &mut dbase),
         "checkout" => diffbase::handle_checkout(&expanded_args, &repo, &mut dbase),
         "cleanup" => handle_cleanup(&repo, &mut dbase).await,
-        "down" => diffbase::handle_down(&expanded_args, &repo, &mut dbase),
+        "down" => diffbase::handle_down(&expanded_args, &repo, &dbase),
         "fix" => handle_fix(&expanded_args, &repo),
         "merge" => diffbase::handle_merge(&expanded_args, &repo, &mut dbase),
-        "pullc" => diffbase::handle_pullc(&expanded_args, &repo, &mut dbase),
+        "pullc" => diffbase::handle_pullc(&expanded_args, &repo, &dbase),
         "review" => handle_review(&expanded_args, &repo, &mut dbase).await,
         "start" => handle_start(&expanded_args, &repo),
-        "up" => diffbase::handle_up(&expanded_args, &repo, &mut dbase),
+        "up" => diffbase::handle_up(&expanded_args, &repo, &dbase),
         "pr" => handle_pr(&expanded_args, &repo, &mut dbase).await,
 
         _ => dispatch_to("git", &expanded_args),

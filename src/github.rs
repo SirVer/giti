@@ -8,7 +8,6 @@ use std::env;
 use std::fmt::Display;
 use std::path::Path;
 use std::str::FromStr;
-use url;
 
 // TODO(sirver): This state of async/await only allowed static references or owning data. So there
 // is lots of cloning going on here.
@@ -21,12 +20,12 @@ pub struct Branch {
 
 impl Branch {
     fn from_label(repo_name: &str, label: &str) -> Self {
-        let mut it = label.split(":");
+        let mut it = label.split(':');
         let owner = it.next().unwrap().to_string();
         let name = it.next().unwrap().to_string();
         Branch {
             repo: RepoId {
-                owner: owner,
+                owner,
                 name: repo_name.to_string(),
             },
             name,
@@ -108,7 +107,7 @@ type Github = hubcaps_ex::Github;
 // bug fixed version from hubcaps: http://lessis.me/hubcaps/src/hubcaps/search/mod.rs.html#229-235
 pub fn repo_tuple(repository_url: &str) -> (String, String) {
     // split the last two elements off the repo url path
-    let parsed = url::Url::parse(&repository_url).unwrap();
+    let parsed = url::Url::parse(repository_url).unwrap();
     let mut path = parsed.path().split('/').collect::<Vec<_>>();
     path.reverse();
     (path[1].to_owned(), path[0].to_owned())
@@ -181,7 +180,7 @@ fn search_result_to_pull_requests(prs: Vec<(RepoId, hubcaps_ex::pulls::Pull)>) -
 
 pub async fn find_assigned_prs(repo: Option<&RepoId>) -> Result<Vec<PullRequest>> {
     let token = env::var("GITHUB_TOKEN")?;
-    let repo = repo.map(|r| r.clone());
+    let repo = repo.cloned();
 
     async move {
         let github = Github::new("SirVer_giti/unspecified", Some(Credentials::Token(token)))
@@ -242,12 +241,12 @@ pub async fn create_pr(
     let pr = async move {
         let github = Github::new("SirVer_giti/unspecified", Some(Credentials::Token(token)))
             .expect("GitHub could not be constructed");
-        let result = github
+
+        github
             .repo(repo_clone.owner.to_string(), repo_clone.name.to_string())
             .pulls()
             .create(&pull_options)
-            .await;
-        result
+            .await
     }
     .await?;
 
@@ -302,9 +301,7 @@ pub fn get_pull_request_template(workdir: &Path) -> Option<String> {
                 .unwrap_or_else(String::new)
                 .to_lowercase();
             if stem == "pull_request_template" {
-                return ::std::fs::read_to_string(p)
-                    .map(|s| Some(s))
-                    .unwrap_or(None);
+                return ::std::fs::read_to_string(p).map(Some).unwrap_or(None);
             }
         }
     }
