@@ -268,14 +268,6 @@ fn run_buildifier(path: &Path) -> Result<()> {
     Ok(())
 }
 
-fn run_rustfmt(path: &Path) -> Result<()> {
-    dispatch_to(
-        "rustfmt",
-        &["--write-mode", "overwrite", &path.to_string_lossy()],
-    )?;
-    Ok(())
-}
-
 pub fn handle_fix(args: &[&str], repo: &git2::Repository) -> Result<()> {
     expect_working_directory_clean()?;
 
@@ -300,7 +292,6 @@ pub fn handle_fix(args: &[&str], repo: &git2::Repository) -> Result<()> {
 
         match (file_name, ext) {
             (_, "h") | (_, "cc") | (_, "proto") => run_clang_format(&full_path)?,
-            (_, "rs") => run_rustfmt(&full_path)?,
             ("BUILD", _) | (_, "BUILD") => run_buildifier(&full_path)?,
             _ => (),
         }
