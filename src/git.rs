@@ -473,24 +473,6 @@ pub fn checkout(repo: &git2::Repository, branch: &str) -> Result<()> {
     Ok(())
 }
 
-pub async fn handle_open_reviews(args: &[&str]) -> Result<()> {
-    if args.len() != 2 {
-        return Err(Error::general(
-            "open_reviews requires a base url as first argument.".into(),
-        ));
-    }
-
-    let prs = github::find_assigned_prs(None).await?;
-    for pr in prs {
-        // Ignore the result.
-        let _ = webbrowser::open(&format!(
-            "{}{}/{}/{}",
-            args[1], pr.target.repo.owner, pr.target.repo.name, pr.number
-        ));
-    }
-    Ok(())
-}
-
 pub fn handle_clone(args: &[&str]) -> Result<()> {
     let github_repo_regex =
         regex::Regex::new(r"^[a-zA-Z\d][a-zA-Z\d-]*/[a-zA-Z\d][a-zA-Z\d-]").unwrap();
@@ -720,7 +702,6 @@ pub async fn handle_repository(original_args: &[&str]) -> Result<()> {
     // Arguments that are valid without a git repository.
     match expanded_args[0] as &str {
         // Intercepted commands.
-        "open_reviews" => return handle_open_reviews(&expanded_args).await,
         "clone" => return handle_clone(&expanded_args),
         "prs" => return handle_prs(&expanded_args).await,
         _ => (),
