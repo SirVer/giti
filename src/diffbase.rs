@@ -6,7 +6,7 @@ use getopts;
 use git2;
 use serde::{Deserialize, Serialize};
 use serde_json;
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::fs;
 use std::fs::File;
 use std::io::{Read, Write};
@@ -87,7 +87,7 @@ impl Diffbase {
 
     fn set_diffbase_quiet(&mut self, branch: &str, diffbase: &str) -> Result<()> {
         let main_branch = git::get_main_branch();
-        if diffbase == main_branch {
+        if diffbase == main_branch || diffbase.starts_with("origin/") {
             return Err(Error::branch_cant_be_diffbase(diffbase));
         }
         if !self.entries.contains_key(branch) {
@@ -166,8 +166,8 @@ impl Diffbase {
         Some(entry.children.iter().map(|s| s as &str).collect())
     }
 
-    /// Returns the ancestor of 'branch' that has no diffbase. Might be the branch itself. Returns
-    /// None if 'branch' is not a valid branch name.
+    /// Returns the ancestor of 'branch'. Might be the branch itself. Returns None if 'branch' is
+    /// not a valid branch name.
     pub fn get_root<'a>(&'a self, branch: &'a str) -> Option<&'a str> {
         // Make sure branch is known to us.
         self.entries.get(branch)?;
@@ -317,11 +317,13 @@ pub fn handle_pullc(args: &[&str], repo: &git2::Repository, diffbase: &Diffbase)
     let do_push = matches.opt_present("push");
 
     let local_branches = git::get_all_local_branches(repo)?;
-    let branch_at_start = git::get_current_branch(repo);
-    let root = diffbase.get_root(&branch_at_start).unwrap();
 
     // Merge main into the root.
     run_command(&["git", "fetch"])?;
+
+    let mut branches_todo: BTreeSet<&str> = local_branches.keys().map(|s| s as &str).collect();
+    let main_branch = git::get_main_branch();
+    let branch_at_start = git::get_current_branch(repo);
 
     let has_upstream = |s| {
         if let Some(b) = local_branches.get(s) {
@@ -330,44 +332,63 @@ pub fn handle_pullc(args: &[&str], repo: &git2::Repository, diffbase: &Diffbase)
         false
     };
 
-    // Sync the root branch.
-    git::checkout(repo, root)?;
-    if has_upstream(root) {
-        run_command(&["git", "pull"])?;
-    }
-    if do_push && has_upstream(root) {
-        run_command(&["git", "push"])?;
-    }
+    while !branches_todo.is_empty() {
+        let current_branch = branches_todo.pop_last().unwrap();
 
-    fn merge_parent_into_children(
-        parent: &str,
-        diffbase: &Diffbase,
-        repo: &git2::Repository,
-        local_branches: &HashMap<String, git::BranchInfo>,
-        do_push: bool,
-    ) -> Result<()> {
-        let has_upstream = |s| {
-            if let Some(b) = local_branches.get(s) {
-                return b.upstream.is_some();
-            }
-            false
-        };
+        let root = diffbase.get_root(&current_branch).unwrap();
 
-        for child in diffbase.get_children(parent).unwrap() {
-            git::checkout(repo, child)?;
-            if has_upstream(child) {
-                run_command(&["git", "pull"])?;
-            }
-            git::merge(parent, repo)?;
-            if do_push && has_upstream(child) {
-                run_command(&["git", "push"])?;
-            }
-            merge_parent_into_children(child, diffbase, repo, local_branches, do_push)?;
+        // Sync the root branch.
+        git::checkout(repo, root)?;
+        if has_upstream(root) {
+            run_command(&["git", "pull"])?;
         }
-        Ok(())
-    }
 
-    merge_parent_into_children(root, diffbase, repo, &local_branches, do_push)?;
+        // No matter if we have an upstream, after we pulled our upstream, we have to merge the
+        // root of our repo.
+        run_command(&["git", "merge", &format!("origin/{main_branch}")])?;
+        if do_push && has_upstream(root) {
+            run_command(&["git", "push"])?;
+        }
+
+        fn merge_parent_into_children(
+            parent: &str,
+            diffbase: &Diffbase,
+            repo: &git2::Repository,
+            local_branches: &HashMap<String, git::BranchInfo>,
+            do_push: bool,
+            todo: &mut BTreeSet<&str>,
+        ) -> Result<()> {
+            let has_upstream = |s| {
+                if let Some(b) = local_branches.get(s) {
+                    return b.upstream.is_some();
+                }
+                false
+            };
+
+            for child in diffbase.get_children(parent).unwrap() {
+                git::checkout(repo, child)?;
+                if has_upstream(child) {
+                    run_command(&["git", "pull"])?;
+                }
+                git::merge(parent, repo)?;
+                if do_push && has_upstream(child) {
+                    run_command(&["git", "push"])?;
+                }
+                todo.remove(child);
+                merge_parent_into_children(child, diffbase, repo, local_branches, do_push, todo)?;
+            }
+            Ok(())
+        }
+
+        merge_parent_into_children(
+            root,
+            diffbase,
+            repo,
+            &local_branches,
+            do_push,
+            &mut branches_todo,
+        )?;
+    }
 
     if git::get_current_branch(repo) != branch_at_start {
         git::checkout(repo, &branch_at_start)?;
