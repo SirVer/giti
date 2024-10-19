@@ -286,7 +286,7 @@ pub async fn get_pr(pr_id: &PullRequestId) -> Result<PullRequest> {
 
 pub fn get_pull_request_template(workdir: &Path) -> Option<String> {
     for sub_path in &[".github", "docs", "."] {
-        let files = match ::std::fs::read_dir(&workdir.join(sub_path)) {
+        let files = match ::std::fs::read_dir(workdir.join(sub_path)) {
             Err(_) => continue,
             Ok(r) => r,
         };

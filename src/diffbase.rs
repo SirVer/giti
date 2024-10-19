@@ -335,7 +335,7 @@ pub fn handle_pullc(args: &[&str], repo: &git2::Repository, diffbase: &Diffbase)
     while !branches_todo.is_empty() {
         let current_branch = branches_todo.pop_last().unwrap();
 
-        let root = diffbase.get_root(&current_branch).unwrap();
+        let root = diffbase.get_root(current_branch).unwrap();
 
         // Sync the root branch.
         git::checkout(repo, root)?;
