@@ -1,4 +1,5 @@
 use crate::diffbase;
+use crate::diffbase::MergeRequest;
 use crate::dispatch::{communicate, dispatch_to, run_command, run_editor};
 use crate::Error;
 use crate::Result;
@@ -86,21 +87,15 @@ pub fn get_all_local_branches(repo: &git2::Repository) -> Result<HashMap<String,
 }
 
 #[derive(Debug, PartialEq, Eq)]
-/// Could be git@github.com:SirVer/giti.git.
-struct Remote {
-    url: String,
+struct GitHubRepository<'a> {
+    remote: &'a Remote,
 }
 
-impl Remote {
-    /// The project part of the URL, i.e. for git@github.com:SirVer/giti.git, this would be
-    /// 'giti.git'.
-    pub fn project(&self) -> &str {
-        self.url.rsplit('/').nth(0).unwrap()
-    }
-
+impl<'a> GitHubRepository<'a> {
     fn owner_and_project(&self) -> &str {
         const GITHUB_HTTPS: &str = "https://github.com/";
-        self.url
+        self.remote
+            .url
             .trim_start_matches(GITHUB_HTTPS)
             .rsplit(':')
             .nth(0)
@@ -119,6 +114,55 @@ impl Remote {
         github::RepoId {
             owner: self.owner().to_string(),
             name: name.to_string(),
+        }
+    }
+}
+
+#[derive(Debug, PartialEq, Eq)]
+struct GitLabRepository<'a> {
+    remote: &'a Remote,
+}
+
+impl<'a> GitLabRepository<'a> {
+    fn project(&self) -> &str {
+        const GITLAB_HTTPS: &str = "https://gitlab.com/";
+        self.remote
+            .url
+            .trim_start_matches(GITLAB_HTTPS)
+            .rsplit(':')
+            .nth(0)
+            .unwrap()
+            .trim_end_matches(".git")
+    }
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum RepositoryType<'a> {
+    GitLab(GitLabRepository<'a>),
+    GitHub(GitHubRepository<'a>),
+    Unknown,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+/// Could be git@github.com:SirVer/giti.git.
+struct Remote {
+    url: String,
+}
+
+impl Remote {
+    /// The project part of the URL, i.e. for git@github.com:SirVer/giti.git, this would be
+    /// 'giti.git'.
+    pub fn project(&self) -> &str {
+        self.url.rsplit('/').nth(0).unwrap()
+    }
+
+    pub fn repository(&self) -> RepositoryType {
+        if self.url.contains("github.com") {
+            RepositoryType::GitHub(GitHubRepository { remote: self })
+        } else if self.url.contains("gitlab.com") {
+            RepositoryType::GitLab(GitLabRepository { remote: self })
+        } else {
+            RepositoryType::Unknown
         }
     }
 }
@@ -205,6 +249,9 @@ fn get_origin(local_branch: &str) -> Option<OriginBranch> {
         Err(_) => return None,
     };
 
+    if remote.is_empty() || _branch.is_empty() {
+        return None;
+    }
     Some(OriginBranch { remote, _branch })
 }
 
@@ -322,9 +369,29 @@ pub async fn handle_cleanup(repo: &git2::Repository, dbase: &mut diffbase::Diffb
             continue;
         }
 
-        if let Some(pr_id) = dbase.get_github_pr(&branch) {
-            let pr = github::get_pr(pr_id).await?;
-            if pr.state == github::PullRequestState::Closed {
+        if let Some(merge_request) = dbase.get_merge_request(&branch) {
+            let should_delete = match merge_request {
+                MergeRequest::GitHub(pr_id) => {
+                    let pr = github::get_pr(pr_id).await?;
+                    if pr.state == github::PullRequestState::Closed {
+                        Some((pr_id.to_string(), branch))
+                    } else {
+                        None
+                    }
+                }
+                MergeRequest::GitLab(mr_id) => {
+                    let gitlab = gitlab::GitLab::new().unwrap();
+                    let mr = gitlab.get_mr(&mr_id.project(), mr_id.number()).await?;
+                    match mr.state {
+                        gitlab::PullRequestState::Closed | gitlab::PullRequestState::Merged => {
+                            Some((mr.web_url, mr.source_branch))
+                        }
+                        gitlab::PullRequestState::Open => None,
+                    }
+                }
+            };
+
+            if let Some((pr_id, branch)) = should_delete {
                 let rev = repo.revparse_single(&branch)?;
                 println!(
                     "{} is closed. Deleting the branch {} ({}).",
@@ -334,7 +401,7 @@ pub async fn handle_cleanup(repo: &git2::Repository, dbase: &mut diffbase::Diffb
                 );
                 run_command(&["git", "branch", "-D", &branch])?;
                 continue;
-            }
+            };
         }
     }
 
@@ -371,7 +438,14 @@ pub async fn handle_review(
     let main_branch = get_main_branch();
     let main_origin = get_origin(&main_branch).unwrap();
     let main_remote = &remotes[&main_origin.remote];
-    let repo_id = main_remote.repository();
+    let repo_id = match main_remote.repository() {
+        RepositoryType::GitHub(s) => s.repository(),
+        _ => {
+            return Err(Error::general(
+                "Cannot handle 'review' for anything but GitHub Repos currently.".to_string(),
+            ))
+        }
+    };
 
     if args.len() == 1 {
         let prs = github::find_assigned_prs(Some(&repo_id)).await?;
@@ -400,14 +474,14 @@ pub async fn handle_review(
         return handle_review_push(repo);
     }
 
-    let (source_branch, pr_id) = if let Ok(pr_number) = args[1].parse::<i32>() {
+    let (source_branch, merge_request) = if let Ok(pr_number) = args[1].parse::<i32>() {
         let pr = github::get_pr(&github::PullRequestId {
             repo: repo_id.clone(),
             number: pr_number,
         })
         .await?;
-        let pr_id = pr.id();
-        (pr.source, Some(pr_id))
+        let merge_request = MergeRequest::GitHub(pr.id());
+        (pr.source, Some(merge_request))
     } else {
         let (user, branch) = {
             let mut it = args[1].splitn(2, ':');
@@ -449,8 +523,8 @@ pub async fn handle_review(
     }
 
     run_command(&["git", "branch", "--track", &local_branch, &branch_to_fork])?;
-    if let Some(pr_id) = pr_id {
-        dbase.set_github_pr(&local_branch, pr_id);
+    if let Some(merge_request) = merge_request {
+        dbase.set_merge_request(&local_branch, merge_request);
     }
     checkout(repo, &local_branch)?;
     Ok(())
@@ -580,15 +654,21 @@ pub async fn handle_pr(
     repo: &git2::Repository,
     dbase: &mut diffbase::Diffbase,
 ) -> Result<()> {
-    let remotes = get_remotes()?;
-
-    let main_branch = get_main_branch();
-    let main_origin = get_origin(&main_branch).unwrap();
-    let base_remote = &remotes[&main_origin.remote];
-    let repo_id = base_remote.repository();
-
     let local_branches = get_all_local_branches(repo)?;
     let current_branch = get_current_branch(repo);
+
+    let remotes = get_remotes()?;
+    let main_branch = get_main_branch();
+    let base_remote = {
+        let origin = match get_origin(&main_branch) {
+            None => get_origin(&current_branch).ok_or(Error::general(
+                "Unable to find origin for merge request.".to_string(),
+            ))?,
+            Some(o) => o,
+        };
+        &remotes[&origin.remote]
+    };
+
     if local_branches[&current_branch].upstream.is_none() {
         return Err(Error::general(
             "current branch has no upstream (maybe git push -u?). \
@@ -600,13 +680,13 @@ pub async fn handle_pr(
     let head_upstream = &local_branches[&current_branch].upstream.clone().unwrap();
     let head_remote = &remotes[head_upstream.split('/').next().unwrap()];
 
-    expect_working_directory_clean()?;
+    // expect_working_directory_clean()?;
 
-    if let Some(pr) = dbase.get_github_pr(&current_branch) {
+    if let Some(merge_request) = dbase.get_merge_request(&current_branch) {
         return Err(Error::general(format!(
-            "current branch already has the PR {} associated with it. \
+            "current branch already has the merge request {:?} associated with it. \
              Refuse to open a new pull request.",
-            pr
+            merge_request
         )));
     }
 
@@ -634,28 +714,50 @@ pub async fn handle_pr(
         None
     };
 
-    // Target to merge into.
-    let base = "main".to_string();
+    let url = match base_remote.repository() {
+        RepositoryType::GitHub(s) => {
+            let repo_id = s.repository();
+            // Base to merge from. If it is in the same fork as base, it must not contain the owners name.
+            let head = if head_remote == base_remote {
+                current_branch.clone()
+            } else {
+                let owner = match head_remote.repository() {
+                    RepositoryType::GitHub(s) => s.owner().to_string(),
+                    _ => unreachable!("Head cannot not be GitHub since base is."),
+                };
+                format!("{}:{}", owner, current_branch)
+            };
 
-    // Base to merge from. If it is in the same fork as base, it must not contain the owners name.
-    let head = if head_remote == base_remote {
-        current_branch.clone()
-    } else {
-        format!("{}:{}", head_remote.owner(), current_branch)
+            let pull_options = hubcaps_ex::pulls::PullOptions {
+                title,
+                body,
+                head,
+                base: main_branch,
+            };
+
+            let pr = github::create_pr(&repo_id, pull_options).await?.id();
+            dbase.set_merge_request(&current_branch, MergeRequest::GitHub(pr.clone()));
+            pr.url()
+        }
+        RepositoryType::GitLab(s) => {
+            let gitlab = gitlab::GitLab::new().unwrap();
+            let mr = gitlab
+                .create_mr(
+                    s.project(),
+                    &current_branch,
+                    &main_branch,
+                    &title,
+                    &body.unwrap_or("".to_string()),
+                )
+                .await?;
+            dbase.set_merge_request(&current_branch, MergeRequest::GitLab(mr.id()));
+            mr.web_url
+        }
+        RepositoryType::Unknown => unreachable!("PR only implemented for GitLab & GitHub."),
     };
 
-    let pull_options = hubcaps_ex::pulls::PullOptions {
-        title,
-        body,
-        head,
-        base,
-    };
-
-    let pr = github::create_pr(&repo_id, pull_options).await?.id();
-    dbase.set_github_pr(&current_branch, pr.clone());
-
-    println!("Opened {}. Opening in web browser.", pr.url());
-    let _ = webbrowser::open(&pr.url());
+    println!("Opened {}. Opening in web browser.", url);
+    let _ = webbrowser::open(&url);
 
     Ok(())
 }

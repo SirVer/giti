@@ -1,7 +1,8 @@
 use crate::dispatch::{dispatch_to, run_command};
 use crate::error::{Error, ErrorKind, Result};
 use crate::git;
-use crate::github::PullRequestId;
+use crate::github;
+use crate::gitlab;
 use getopts;
 use git2;
 use serde::{Deserialize, Serialize};
@@ -12,18 +13,25 @@ use std::fs::File;
 use std::io::{Read, Write};
 use std::path;
 
+#[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(tag = "type")]
+pub enum MergeRequest {
+    GitHub(github::PullRequestId),
+    GitLab(gitlab::PullRequestId),
+}
+
 #[derive(Serialize, Deserialize, Debug)]
 pub struct DiffbaseJson {
     branch: String,
     diffbase: Option<String>,
-    github_pr: Option<PullRequestId>,
+    merge_request: Option<MergeRequest>,
 }
 
 #[derive(Debug, Default)]
 struct DiffbaseEntry {
     parent: Option<String>,
     children: Vec<String>,
-    github_pr: Option<PullRequestId>,
+    merge_request: Option<MergeRequest>,
 }
 
 pub struct Diffbase {
@@ -44,7 +52,7 @@ impl Diffbase {
                 DiffbaseEntry {
                     children: Vec::new(),
                     parent: None,
-                    github_pr: None,
+                    merge_request: None,
                 },
             );
         }
@@ -68,7 +76,11 @@ impl Diffbase {
                 continue;
             }
 
-            diffbase.entries.get_mut(&entry.branch).unwrap().github_pr = entry.github_pr;
+            diffbase
+                .entries
+                .get_mut(&entry.branch)
+                .unwrap()
+                .merge_request = entry.merge_request;
 
             let parent_name = match entry.diffbase {
                 None => continue,
@@ -118,7 +130,7 @@ impl Diffbase {
             json_entries.push(DiffbaseJson {
                 branch: key.to_string(),
                 diffbase: entry.parent.clone(),
-                github_pr: entry.github_pr.clone(),
+                merge_request: entry.merge_request.clone(),
             });
         }
         let json_string = serde_json::to_string_pretty(&json_entries)?;
@@ -183,15 +195,17 @@ impl Diffbase {
         }
     }
 
-    pub fn get_github_pr(&self, branch: &str) -> Option<&PullRequestId> {
-        self.entries.get(branch).and_then(|b| b.github_pr.as_ref())
+    pub fn get_merge_request(&self, branch: &str) -> Option<&MergeRequest> {
+        self.entries
+            .get(branch)
+            .and_then(|b| b.merge_request.as_ref())
     }
 
-    pub fn set_github_pr(&mut self, branch: &str, pr: PullRequestId) {
+    pub fn set_merge_request(&mut self, branch: &str, merge_request: MergeRequest) {
         if !self.entries.contains_key(branch) {
             self.entries.insert(branch.to_string(), Default::default());
         }
-        self.entries.get_mut(branch).unwrap().github_pr = Some(pr);
+        self.entries.get_mut(branch).unwrap().merge_request = Some(merge_request);
     }
 }
 
