@@ -650,10 +650,21 @@ pub async fn handle_prs(args: &[&str]) -> Result<()> {
 }
 
 pub async fn handle_pr(
-    _args: &[&str],
+    args: &[&str],
     repo: &git2::Repository,
     dbase: &mut diffbase::Diffbase,
 ) -> Result<()> {
+    let mut opts = getopts::Options::new();
+    opts.optopt("f", "file", "Read merge request description from FILE.", "FILE");
+
+    let matches = match opts.parse(&args[1..]) {
+        Ok(m) => m,
+        Err(err) => {
+            let brief = format!("{}\nUsage: g pr [options]", err);
+            return Err(Error::general(opts.usage(&brief)));
+        }
+    };
+
     let local_branches = get_all_local_branches(repo)?;
     let current_branch = get_current_branch(repo);
 
@@ -690,19 +701,27 @@ pub async fn handle_pr(
         )));
     }
 
-    // Get PR original post message.
-    let mut temp_file = tempfile::Builder::new()
-        .prefix("COMMIT_EDITMSG")
-        .rand_bytes(0)
-        .tempfile()?;
+    let content = if let Some(file_path) = matches.opt_str("file") {
+        let content = ::std::fs::read_to_string(&file_path).map_err(|e| {
+            Error::general(format!("Could not read file '{}': {}", file_path, e))
+        })?;
+        content.trim().to_string()
+    } else {
+        // Get PR original post message via editor.
+        let mut temp_file = tempfile::Builder::new()
+            .prefix("COMMIT_EDITMSG")
+            .rand_bytes(0)
+            .tempfile()?;
 
-    if let Some(msg) = github::get_pull_request_template(repo.workdir().unwrap()) {
-        temp_file.write_all(msg.as_bytes())?
-    }
-    let temp_path = temp_file.into_temp_path();
+        if let Some(msg) = github::get_pull_request_template(repo.workdir().unwrap()) {
+            temp_file.write_all(msg.as_bytes())?
+        }
+        let temp_path = temp_file.into_temp_path();
 
-    run_editor(&temp_path)?;
-    let content = ::std::fs::read_to_string(&temp_path)?.trim().to_string();
+        run_editor(&temp_path)?;
+        ::std::fs::read_to_string(&temp_path)?.trim().to_string()
+    };
+
     let lines: Vec<String> = content.lines().map(|l| l.trim().to_string()).collect();
     if lines.is_empty() {
         return Err(Error::general("No message, no PR.".into()));
