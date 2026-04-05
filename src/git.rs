@@ -665,27 +665,22 @@ pub async fn handle_pr(
         }
     };
 
-    let local_branches = get_all_local_branches(repo)?;
+    let mut local_branches = get_all_local_branches(repo)?;
     let current_branch = get_current_branch(repo);
 
     let remotes = get_remotes()?;
     let main_branch = get_main_branch();
-    let base_remote = {
-        let origin = match get_origin(&main_branch) {
-            None => get_origin(&current_branch).ok_or(Error::general(
-                "Unable to find origin for merge request.".to_string(),
-            ))?,
-            Some(o) => o,
-        };
-        &remotes[&origin.remote]
+    let base_origin = match get_origin(&main_branch) {
+        None => get_origin(&current_branch).ok_or(Error::general(
+            "Unable to find origin for merge request.".to_string(),
+        ))?,
+        Some(o) => o,
     };
+    let base_remote = &remotes[&base_origin.remote];
 
     if local_branches[&current_branch].upstream.is_none() {
-        return Err(Error::general(
-            "current branch has no upstream (maybe git push -u?). \
-             Cannot open a pull request."
-                .into(),
-        ));
+        run_command(&["git", "push", "-u", &base_origin.remote, &current_branch])?;
+        local_branches = get_all_local_branches(repo)?;
     }
     // Could be "SirVer/foobar" or "origin/foobar"
     let head_upstream = &local_branches[&current_branch].upstream.clone().unwrap();
